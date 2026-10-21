@@ -5,7 +5,7 @@ import {
   AlertTriangle, Hash, Timer, Play, Square, Undo2, RotateCcw,
 } from 'lucide-react';
 import {
-  COMPETITION, ADMIN_PASSWORD, OBSTACLES, POINTS_PER_OBSTACLE, LANDING_OPTIONS,
+  COMPETITION, ADMIN_PASSWORD, HQ_PASSWORD, OBSTACLES, POINTS_PER_OBSTACLE, LANDING_OPTIONS,
   DEFAULT_LANDING, TIME_BRACKETS, TIME_POINTS_INCOMPLETE, CSV_FILENAME,
 } from './config';
 import {
@@ -16,6 +16,7 @@ import { useScores, failMessage } from './useScores';
 import { useStopwatch, msToSeconds, formatMs, formatSeconds } from './useStopwatch';
 
 const AUTH_KEY = 'drone_chase_auth_2026';
+const HQ_KEY = 'drone_chase_hq_2026';
 
 // 안전한 sessionStorage 접근 (사파리 비공개 모드 등에서 예외 방지)
 const session = {
@@ -30,6 +31,7 @@ const session = {
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => session.get(AUTH_KEY) === 'true');
   const [view, setView] = useState('landing');
+  const [hqAuth, setHqAuth] = useState(() => session.get(HQ_KEY) === 'true');
   const [toast, setToast] = useState(null);
   const store = useScores();
 
@@ -46,7 +48,13 @@ export default function App() {
     return <LoginGate onLogin={() => { session.set(AUTH_KEY, 'true'); setIsAuthenticated(true); }} />;
   }
 
-  const logout = () => { session.remove(AUTH_KEY); setIsAuthenticated(false); setView('landing'); };
+  const logout = () => {
+    session.remove(AUTH_KEY);
+    session.remove(HQ_KEY);
+    setIsAuthenticated(false);
+    setHqAuth(false);
+    setView('landing');
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 pb-24">
@@ -71,7 +79,14 @@ export default function App() {
       <main className="max-w-6xl mx-auto px-4 py-6 sm:px-6 sm:py-10 animate-fade-in" key={view}>
         {view === 'landing' && <LandingView setView={setView} count={store.scores.length} />}
         {view === 'judge' && <JudgePanel addScore={store.addScore} notify={notify} />}
-        {view === 'dashboard' && <Dashboard {...store} notify={notify} />}
+        {view === 'dashboard' && (hqAuth ? (
+          <Dashboard {...store} notify={notify} />
+        ) : (
+          <HqGate
+            onUnlock={() => { session.set(HQ_KEY, 'true'); setHqAuth(true); }}
+            onCancel={() => setView('landing')}
+          />
+        ))}
       </main>
 
       {toast && (
@@ -205,6 +220,56 @@ function LoginGate({ onLogin }) {
 // =============================================================================
 //  Landing
 // =============================================================================
+// =============================================================================
+//  HQ Dashboard 비밀번호 확인
+// =============================================================================
+function HqGate({ onUnlock, onCancel }) {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState(false);
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (password === HQ_PASSWORD) onUnlock();
+    else { setError(true); setPassword(''); }
+  };
+
+  return (
+    <div className="flex justify-center py-6 sm:py-12">
+      <form onSubmit={submit} className="w-full max-w-md bg-white border border-slate-200 rounded-3xl shadow-lg p-8 text-center">
+        <div className="w-16 h-16 mx-auto mb-5 rounded-2xl bg-blue-600 text-white grid place-items-center">
+          <Trophy size={30} />
+        </div>
+        <h2 className="text-2xl font-black text-slate-900">HQ Dashboard</h2>
+        <p className="mt-2 text-slate-600 font-medium">본부 전용입니다. HQ 비밀번호를 입력하세요.</p>
+
+        <label htmlFor="hq-pw" className="sr-only">HQ password</label>
+        <input
+          id="hq-pw"
+          type="password"
+          placeholder="HQ password"
+          autoFocus
+          autoComplete="off"
+          value={password}
+          onChange={(e) => { setPassword(e.target.value); setError(false); }}
+          className={`mt-6 w-full h-14 px-5 rounded-2xl border-2 text-center text-xl font-bold text-slate-900 placeholder:text-slate-400 placeholder:text-base outline-none transition-colors ${
+            error ? 'border-red-500 bg-red-50' : 'border-slate-300 focus:border-blue-600 bg-white'
+          }`}
+        />
+        {error && <p className="mt-3 text-red-700 font-bold">HQ 비밀번호가 올바르지 않습니다.</p>}
+
+        <div className="mt-5 grid grid-cols-2 gap-3">
+          <button type="button" onClick={onCancel} className="h-14 rounded-2xl border-2 border-slate-300 text-slate-700 font-bold hover:bg-slate-50">
+            취소
+          </button>
+          <button type="submit" className="h-14 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black">
+            입장
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function LandingView({ setView, count }) {
   return (
     <div className="py-6 sm:py-12">

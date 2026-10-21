@@ -69,7 +69,8 @@ npm run dev
 | 고칠 내용 | 항목 |
 |---|---|
 | 대회 이름·부제·행사명 | `COMPETITION` |
-| 접속 코드 | `ADMIN_PASSWORD` |
+| 접속 코드 (모든 사용자) | `ADMIN_PASSWORD` |
+| HQ Dashboard 비밀번호 (본부 전용) | `HQ_PASSWORD` |
 | 기록 저장 위치(대회마다 다르게) | `DB_PATH` |
 | 장애물 개수·이름·점수 | `OBSTACLES`, `POINTS_PER_OBSTACLE` |
 | 착륙 점수 선택지 | `LANDING_OPTIONS` |
