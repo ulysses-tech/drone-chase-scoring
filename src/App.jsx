@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Trophy, ClipboardList, Save, Download, Trash2, CheckCircle2, Clock, User, ArrowRight,
   Pencil, X, Lock, Crosshair, Target, Wifi, WifiOff, Loader2, FlaskConical, LogOut,
-  AlertTriangle, Hash,
+  AlertTriangle, Hash, Timer, Play, Square, Undo2, RotateCcw,
 } from 'lucide-react';
 import {
   COMPETITION, ADMIN_PASSWORD, OBSTACLES, POINTS_PER_OBSTACLE, LANDING_OPTIONS,
@@ -13,6 +13,7 @@ import {
   missionScoreOf, timeScoreOf, rankRows,
 } from './scoring';
 import { useScores } from './useScores';
+import { useStopwatch, msToSeconds, formatMs, formatSeconds } from './useStopwatch';
 
 const AUTH_KEY = 'drone_chase_auth_2026';
 
@@ -295,7 +296,7 @@ function PtsTag({ children, tone }) {
   return <span className={`text-sm font-black px-3 py-1 rounded-lg ${t}`}>{children}</span>;
 }
 
-function ScoreFields({ form, setForm, compact = false }) {
+function ScoreFields({ form, setForm, compact = false, stopwatch }) {
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
   const toggleObstacle = (i) =>
     setForm((f) => {
@@ -419,8 +420,19 @@ function ScoreFields({ form, setForm, compact = false }) {
           title="Lap Time · 기록"
           icon={Clock}
           accent="blue"
-          right={<PtsTag tone="blue">{timeScoreOf(mission, form.lapTime)} / {MAX_TIME}</PtsTag>}
+          right={
+            <div className="flex items-center gap-2">
+              {stopwatch && <TimerStatusChip status={stopwatch.status} />}
+              <PtsTag tone="blue">{timeScoreOf(mission, form.lapTime)} / {MAX_TIME}</PtsTag>
+            </div>
+          }
         >
+          {stopwatch && (
+            <p className="mb-3 text-sm font-semibold text-slate-700">
+              하단 초시계로 측정하세요. <b className="text-blue-800">STOP</b>을 누르면 기록이 자동 입력됩니다 — 필요할 때만 직접 고치세요.
+              <span className="hidden lg:inline text-slate-500"> (PC: 스페이스바로 시작/정지)</span>
+            </p>
+          )}
           <div className="relative">
             <input
               type="number"
@@ -437,6 +449,76 @@ function ScoreFields({ form, setForm, compact = false }) {
           <TimeRuleHint />
         </Section>
       </div>
+    </div>
+  );
+}
+
+function TimerStatusChip({ status }) {
+  const map = {
+    idle: ['bg-slate-100 text-slate-700 border-slate-300', 'Ready'],
+    running: ['bg-rose-50 text-rose-700 border-rose-300 animate-pulse', 'Timing…'],
+    stopped: ['bg-emerald-50 text-emerald-800 border-emerald-300', 'Recorded'],
+  };
+  const [cls, text] = map[status] || map.idle;
+  return (
+    <span className={`hidden sm:inline-flex items-center gap-1 text-xs font-black px-2.5 py-1 rounded-lg border ${cls}`}>
+      <Timer size={13} /> {text}
+    </span>
+  );
+}
+
+/** 하단 고정 바의 초시계 — 어느 위치로 스크롤해도 바로 누를 수 있음 */
+function StopwatchControl({ sw, lapTime }) {
+  const running = sw.status === 'running';
+  const stopped = sw.status === 'stopped';
+  const box = running ? 'bg-rose-50 border-rose-300' : stopped ? 'bg-emerald-50 border-emerald-300' : 'bg-slate-50 border-slate-300';
+  const txt = running ? 'text-rose-700' : stopped ? 'text-emerald-800' : 'text-slate-800';
+  const dot = running ? 'bg-rose-500 animate-pulse' : stopped ? 'bg-emerald-500' : 'bg-slate-400';
+  const btn = 'h-16 rounded-xl font-black flex items-center justify-center gap-2 transition active:scale-95';
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className={`h-16 px-3 sm:px-4 rounded-xl border-2 flex items-center gap-2.5 min-w-[9.5rem] sm:min-w-[11rem] ${box}`}>
+        <span className={`w-3 h-3 rounded-full shrink-0 ${dot}`} />
+        <div className="leading-none">
+          <div className="text-[10px] font-black uppercase tracking-widest text-slate-600 mb-1">
+            {running ? 'Timing' : stopped ? 'Recorded' : 'Stopwatch'}
+          </div>
+          <div className={`font-mono text-2xl sm:text-3xl font-black tabular-nums ${txt}`}>
+            {running ? formatMs(sw.elapsed) : stopped ? formatSeconds(lapTime) : '0:00.00'}
+          </div>
+        </div>
+      </div>
+
+      {sw.status === 'idle' && (
+        <button type="button" onClick={sw.start} className={`${btn} flex-1 sm:flex-none sm:w-36 px-5 bg-emerald-600 hover:bg-emerald-700 text-white text-lg`}>
+          <Play size={20} fill="currentColor" /> START
+        </button>
+      )}
+      {running && (
+        <button type="button" onClick={sw.stop} className={`${btn} flex-1 sm:flex-none sm:w-36 px-5 bg-rose-600 hover:bg-rose-700 text-white text-lg`}>
+          <Square size={20} fill="currentColor" /> STOP
+        </button>
+      )}
+      {stopped && (
+        <>
+          <button
+            type="button"
+            onClick={sw.undo}
+            title="실수로 멈췄다면 처음 시작 시각부터 이어서 측정"
+            className={`${btn} flex-1 sm:flex-none px-3 bg-white border-2 border-slate-300 text-slate-800 text-sm hover:border-slate-500`}
+          >
+            <Undo2 size={18} /> Undo
+          </button>
+          <button
+            type="button"
+            onClick={() => { if (window.confirm('초시계를 0:00.00으로 초기화할까요?\n(랩타임 칸의 값은 그대로 유지됩니다.)')) sw.reset(); }}
+            className={`${btn} flex-1 sm:flex-none px-3 bg-white border-2 border-slate-300 text-slate-800 text-sm hover:border-slate-500`}
+          >
+            <RotateCcw size={18} /> Reset
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -475,6 +557,26 @@ function JudgePanel({ addScore, notify }) {
   const [saving, setSaving] = useState(false);
   const [submitted, setSubmitted] = useState(null);
 
+  // 초시계: 정지하면 랩타임 칸에 자동 입력 (초 단위, 소수 둘째 자리)
+  const sw = useStopwatch((ms) => setForm((f) => ({ ...f, lapTime: msToSeconds(ms).toFixed(2) })));
+  const swRef = useRef(sw);
+  swRef.current = sw;
+  const timerRunning = sw.status === 'running';
+
+  // PC: 스페이스바로 Start/Stop (입력 칸·버튼 사용 중에는 동작 안 함)
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.code !== 'Space' || e.repeat) return;
+      const t = e.target;
+      const tag = String(t?.tagName || '').toLowerCase();
+      if (['input', 'textarea', 'select', 'button'].includes(tag) || t?.isContentEditable) return;
+      e.preventDefault();
+      swRef.current.toggle();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const mission = missionScoreOf(form.obstacles);
   const landing = Number(form.landingScore) || 0;
   const time = timeScoreOf(mission, form.lapTime);
@@ -483,6 +585,7 @@ function JudgePanel({ addScore, notify }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (saving) return;
+    if (timerRunning) return notify('초시계가 측정 중입니다. STOP을 누른 뒤 제출하세요.');
     const err = validate(form);
     if (err) return notify(err);
 
@@ -492,6 +595,7 @@ function JudgePanel({ addScore, notify }) {
     if (!ok) return notify('전송 실패! 인터넷 연결과 Firebase 설정을 확인하세요.'); // 입력값은 그대로 유지
 
     setSubmitted({ bib: form.bib, name: form.name, total });
+    sw.reset(); // 다음 참가자를 위해 초시계 초기화
     setTimeout(() => {
       setSubmitted(null);
       setForm(blankForm());
@@ -522,16 +626,26 @@ function JudgePanel({ addScore, notify }) {
             Total {MAX_TOTAL} = Mission {MAX_MISSION} + Landing {MAX_LANDING} + Time {MAX_TIME}
           </p>
         </div>
-        <button type="button" onClick={() => setForm(blankForm())} className="h-10 px-4 rounded-lg text-slate-700 font-bold hover:bg-slate-200">
+        <button
+          type="button"
+          onClick={() => {
+            if (timerRunning && !window.confirm('초시계가 측정 중입니다. 입력값과 초시계를 모두 초기화할까요?')) return;
+            setForm(blankForm());
+            sw.reset();
+          }}
+          className="h-10 px-4 rounded-lg text-slate-700 font-bold hover:bg-slate-200"
+        >
           초기화 · Clear
         </button>
       </div>
 
-      <ScoreFields form={form} setForm={setForm} />
+      <ScoreFields form={form} setForm={setForm} stopwatch={sw} />
 
-      {/* 하단 고정: 실시간 합계 + 제출 */}
-      <div className="sticky bottom-3 mt-6 z-40">
-        <div className="bg-white border-2 border-slate-300 rounded-2xl shadow-xl p-3 flex items-center gap-3">
+      {/* 하단 고정: 초시계 + 실시간 합계 + 제출 */}
+      <div className="sticky bottom-3 mt-6 z-40" style={{ marginBottom: 'env(safe-area-inset-bottom)' }}>
+        <div className="bg-white border-2 border-slate-300 rounded-2xl shadow-xl p-3 flex flex-col lg:flex-row lg:items-center gap-3">
+          <StopwatchControl sw={sw} lapTime={form.lapTime} />
+          <div className="flex items-center gap-3 flex-1 min-w-0">
           <div className="flex-1 grid grid-cols-4 text-center">
             <Mini label="Mission" value={mission} tone="text-emerald-700" />
             <Mini label="Landing" value={landing} tone="text-violet-700" />
@@ -540,12 +654,14 @@ function JudgePanel({ addScore, notify }) {
           </div>
           <button
             type="submit"
-            disabled={saving}
-            className="h-16 px-6 sm:px-8 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-400 text-white text-lg font-black flex items-center gap-2 transition active:scale-[0.98]"
+            disabled={saving || timerRunning}
+            title={timerRunning ? 'STOP을 먼저 누르세요' : undefined}
+            className="h-16 px-5 sm:px-7 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed text-white text-lg font-black flex items-center gap-2 transition active:scale-[0.98]"
           >
-            {saving ? <Loader2 size={24} className="animate-spin" /> : <Save size={24} />}
-            <span className="hidden sm:inline">{saving ? 'Saving…' : 'Submit'}</span>
+            {saving ? <Loader2 size={24} className="animate-spin" /> : timerRunning ? <Timer size={24} /> : <Save size={24} />}
+            <span className="hidden sm:inline">{saving ? 'Saving…' : timerRunning ? 'Stop first' : 'Submit'}</span>
           </button>
+          </div>
         </div>
       </div>
     </form>
