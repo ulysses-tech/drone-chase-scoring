@@ -1,6 +1,5 @@
 # main 브랜치에 push 하면 GitHub Pages 로 자동 배포됩니다.
-# 사용 전: 저장소 Settings → Pages → Source 를 "GitHub Actions" 로 선택,
-#          Settings → Secrets and variables → Actions 에 VITE_FIREBASE_* 6개 값을 등록.
+# 사용 전: 저장소 Settings → Pages → Source 를 "GitHub Actions" 로 선택하세요.
 name: Deploy to GitHub Pages
 
 on:
@@ -28,13 +27,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-        env:
-          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
-          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
-          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
-          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
-          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
-          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

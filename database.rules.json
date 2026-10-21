@@ -1,0 +1,11 @@
+{
+  "rules": {
+    "drone_chase_2026": {
+      ".read": true,
+      ".write": true,
+      "$recordId": {
+        ".validate": "newData.hasChildren(['bib', 'name', 'landingScore', 'lapTime'])"
+      }
+    }
+  }
+}

@@ -13,8 +13,9 @@ export const COMPETITION = {
 // 접속 비밀번호 (화면 잠금용 — 보안 장치는 아닙니다. README '보안' 항목 참고)
 export const ADMIN_PASSWORD = '2026';
 
-// Firestore 컬렉션 이름 (대회마다 다르게 두면 기록이 섞이지 않습니다)
-export const COLLECTION_NAME = 'orbital_scores_2026';
+// Firebase Realtime Database 안의 저장 위치 (대회마다 다르게 두면 기록이 섞이지 않습니다)
+// ※ IDRCC 채점 앱이 쓰는 'scores', 'signatures' 와 같은 이름은 쓰지 마세요.
+export const DB_PATH = 'drone_chase_2026';
 
 // CSV 저장 파일명
 export const CSV_FILENAME = 'Drone_Chase_2026_Results.csv';

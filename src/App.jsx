@@ -12,7 +12,7 @@ import {
   MAX_MISSION, MAX_LANDING, MAX_TIME, MAX_TOTAL, emptyObstacles, normalizeObstacles,
   missionScoreOf, timeScoreOf, rankRows,
 } from './scoring';
-import { useScores } from './useScores';
+import { useScores, failMessage } from './useScores';
 import { useStopwatch, msToSeconds, formatMs, formatSeconds } from './useStopwatch';
 
 const AUTH_KEY = 'drone_chase_auth_2026';
@@ -54,12 +54,17 @@ export default function App() {
 
       {store.status === 'demo' && (
         <div className="bg-amber-100 border-b border-amber-300 text-amber-900 text-sm font-semibold px-4 py-2 text-center">
-          데모 모드 — Firebase 설정(.env)이 없어 이 기기 브라우저에만 저장됩니다. 실제 대회 전 README의 Firebase 설정을 완료하세요.
+          데모 모드 — Firebase 설정(src/firebaseConfig.js)이 없어 이 기기 브라우저에만 저장됩니다.
+        </div>
+      )}
+      {store.status === 'offline' && (
+        <div className="bg-red-100 border-b border-red-300 text-red-900 text-sm font-semibold px-4 py-2 text-center">
+          인터넷 연결이 끊겼습니다 — 연결되면 자동으로 다시 동기화됩니다. 그동안 제출은 잠시 막힙니다.
         </div>
       )}
       {store.status === 'error' && (
         <div className="bg-red-100 border-b border-red-300 text-red-900 text-sm font-semibold px-4 py-2 text-center">
-          클라우드 연결 오류 — 인터넷 연결과 Firebase 설정·보안 규칙을 확인하세요.
+          데이터베이스에 접근할 수 없습니다 — Firebase 보안 규칙(README 참고)을 확인하세요.
         </div>
       )}
 
@@ -133,7 +138,8 @@ function StatusBadge({ status }) {
   const map = {
     online: { text: 'Live', icon: Wifi, cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
     connecting: { text: 'Connecting', icon: Loader2, cls: 'bg-slate-50 text-slate-700 border-slate-200', spin: true },
-    error: { text: 'Offline', icon: WifiOff, cls: 'bg-red-50 text-red-700 border-red-200' },
+    offline: { text: 'Offline', icon: WifiOff, cls: 'bg-red-50 text-red-700 border-red-200' },
+    error: { text: 'Error', icon: WifiOff, cls: 'bg-red-50 text-red-700 border-red-200' },
     demo: { text: 'Demo', icon: FlaskConical, cls: 'bg-amber-50 text-amber-800 border-amber-300' },
   };
   const s = map[status] || map.connecting;
@@ -590,9 +596,9 @@ function JudgePanel({ addScore, notify }) {
     if (err) return notify(err);
 
     setSaving(true);
-    const ok = await addScore({ ...form, obstacles: normalizeObstacles(form.obstacles) });
+    const res = await addScore({ ...form, obstacles: normalizeObstacles(form.obstacles) });
     setSaving(false);
-    if (!ok) return notify('전송 실패! 인터넷 연결과 Firebase 설정을 확인하세요.'); // 입력값은 그대로 유지
+    if (!res.ok) return notify(failMessage(res.reason)); // 입력값은 그대로 유지
 
     setSubmitted({ bib: form.bib, name: form.name, total });
     sw.reset(); // 다음 참가자를 위해 초시계 초기화
@@ -714,16 +720,16 @@ function Dashboard({ scores, updateScore, deleteScore, clearScores, notify }) {
 
   const handleDelete = async (row) => {
     if (!window.confirm(`#${row.bib} ${row.name} 기록을 삭제할까요?`)) return;
-    const ok = await deleteScore(row.id);
-    notify(ok ? '삭제했습니다.' : '삭제 실패 — 연결을 확인하세요.', ok ? 'success' : 'error');
+    const res = await deleteScore(row.id);
+    notify(res.ok ? '삭제했습니다.' : failMessage(res.reason), res.ok ? 'success' : 'error');
   };
 
   const handleClear = async () => {
     if (!scores.length) return;
     if (!window.confirm(`⚠️ 전체 ${scores.length}건의 기록을 영구 삭제합니다.\n되돌릴 수 없습니다. 계속할까요?`)) return;
     if (window.prompt('확인을 위해 RESET 을 입력하세요.') !== 'RESET') return;
-    const ok = await clearScores(scores.map((s) => s.id));
-    notify(ok ? '전체 기록을 삭제했습니다.' : '전체 삭제 실패 — 연결을 확인하세요.', ok ? 'success' : 'error');
+    const res = await clearScores();
+    notify(res.ok ? '전체 기록을 삭제했습니다.' : failMessage(res.reason), res.ok ? 'success' : 'error');
   };
 
   const top3 = ranked.slice(0, 3);
@@ -735,9 +741,9 @@ function Dashboard({ scores, updateScore, deleteScore, clearScores, notify }) {
           record={editing}
           onClose={() => setEditingId(null)}
           onSave={async (rec) => {
-            const ok = await updateScore(rec);
-            notify(ok ? '수정했습니다.' : '수정 실패 — 연결을 확인하세요.', ok ? 'success' : 'error');
-            return ok;
+            const res = await updateScore(rec);
+            notify(res.ok ? '수정했습니다.' : failMessage(res.reason), res.ok ? 'success' : 'error');
+            return res.ok;
           }}
         />
       )}
