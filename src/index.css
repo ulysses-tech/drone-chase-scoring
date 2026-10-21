@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+}
+
+/* 숫자 입력칸의 스핀 버튼 제거 (태블릿 오입력 방지) */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+}
+
+/* 키보드 사용 시 포커스 표시를 분명하게 */
+:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
