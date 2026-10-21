@@ -6,7 +6,7 @@
 export const COMPETITION = {
   title: 'Drone Chase',                       // 상단 큰 제목
   subtitle: 'Orbital Pursuit 2026',           // 보조 제목
-  event: 'XXVI Mongolian Technical Olympiad', // 행사명
+  event: '2026 IDCC', // 행사명
   year: 2026,
 };
 
