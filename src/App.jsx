@@ -560,6 +560,55 @@ function ReadyAlert({ acknowledged, onAcknowledge }) {
   );
 }
 
+/** 초시계를 쓰지 않고 제출할 때 띄우는 확인 창 */
+function NoTimerDialog({ lapTime, onBack, onSubmitAnyway }) {
+  const hasTime = Number(lapTime) > 0;
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onBack();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onBack]);
+
+  return (
+    <div className="fixed inset-0 z-[150] bg-slate-900/50 flex items-center justify-center p-4 animate-fade-in" onClick={onBack}>
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="no-timer-title"
+        className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="bg-red-600 text-white px-6 py-5 flex items-center gap-3">
+          <AlertTriangle size={28} className="shrink-0" />
+          <h3 id="no-timer-title" className="text-xl font-black">초시계로 측정하지 않았습니다</h3>
+        </div>
+        <div className="px-6 py-5 text-slate-800 font-semibold leading-relaxed">
+          {hasTime ? (
+            <p>
+              랩타임 <b className="font-mono text-red-700">{Number(lapTime).toFixed(2)}초</b>가 직접 입력되어 있습니다.
+              <br />초시계(START → STOP)로 잰 기록이 아닙니다.
+            </p>
+          ) : (
+            <p>
+              랩타임이 비어 있어 <b className="text-red-700">기록 없음(DNF)</b>으로 저장됩니다.
+              <br />초시계를 시작하지 않았습니다.
+            </p>
+          )}
+          <p className="mt-3 text-slate-600">그래도 제출할까요?</p>
+        </div>
+        <div className="px-6 pb-6 grid grid-cols-2 gap-3">
+          <button type="button" onClick={onBack} autoFocus className="h-14 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-black">
+            돌아가기
+          </button>
+          <button type="button" onClick={onSubmitAnyway} className="h-14 rounded-2xl border-2 border-red-400 text-red-700 hover:bg-red-50 font-black">
+            그래도 제출
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TimerStatusChip({ status }) {
   const map = {
     idle: ['bg-slate-100 text-slate-700 border-slate-300', 'Ready'],
@@ -575,7 +624,7 @@ function TimerStatusChip({ status }) {
 }
 
 /** 하단 고정 바의 초시계 — 어느 위치로 스크롤해도 바로 누를 수 있음 */
-function StopwatchControl({ sw, lapTime }) {
+function StopwatchControl({ sw, lapTime, highlightStart = false }) {
   const running = sw.status === 'running';
   const stopped = sw.status === 'stopped';
   const box = running ? 'bg-rose-50 border-rose-300' : stopped ? 'bg-emerald-50 border-emerald-300' : 'bg-slate-50 border-slate-300';
@@ -598,7 +647,13 @@ function StopwatchControl({ sw, lapTime }) {
       </div>
 
       {sw.status === 'idle' && (
-        <button type="button" onClick={sw.start} className={`${btn} flex-1 sm:flex-none sm:w-36 px-5 bg-emerald-600 hover:bg-emerald-700 text-white text-lg`}>
+        <button
+          type="button"
+          onClick={sw.start}
+          className={`${btn} flex-1 sm:flex-none sm:w-36 px-5 bg-emerald-600 hover:bg-emerald-700 text-white text-lg ${
+            highlightStart ? 'animate-blink ring-4 ring-red-500 ring-offset-2' : ''
+          }`}
+        >
           <Play size={20} fill="currentColor" /> START
         </button>
       )}
@@ -697,12 +752,18 @@ function JudgePanel({ addScore, notify }) {
   const time = timeScoreOf(mission, form.lapTime);
   const total = mission + landing + time;
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  // 초시계를 쓰지 않고 제출하려 할 때 확인 창
+  const [confirmNoTimer, setConfirmNoTimer] = useState(false);
+
+  const handleSubmit = async (e, { skipTimerCheck = false } = {}) => {
+    e?.preventDefault();
     if (saving) return;
     if (timerRunning) return notify('초시계가 측정 중입니다. STOP을 누른 뒤 제출하세요.');
     const err = validate(form);
     if (err) return notify(err);
+    // 이 참가자에 대해 초시계를 START→STOP 하지 않았다면 한 번 더 확인
+    if (!skipTimerCheck && sw.status !== 'stopped') return setConfirmNoTimer(true);
+    setConfirmNoTimer(false);
 
     setSaving(true);
     const res = await addScore({ ...form, obstacles: normalizeObstacles(form.obstacles) });
@@ -761,10 +822,18 @@ function JudgePanel({ addScore, notify }) {
         afterParticipant={hasName && <ReadyAlert acknowledged={readyAck} onAcknowledge={() => setReadyAck(true)} />}
       />
 
+      {confirmNoTimer && (
+        <NoTimerDialog
+          lapTime={form.lapTime}
+          onBack={() => setConfirmNoTimer(false)}
+          onSubmitAnyway={() => handleSubmit(null, { skipTimerCheck: true })}
+        />
+      )}
+
       {/* 하단 고정: 초시계 + 실시간 합계 + 제출 */}
       <div className="sticky bottom-3 mt-6 z-40" style={{ marginBottom: 'env(safe-area-inset-bottom)' }}>
         <div className="bg-white border-2 border-slate-300 rounded-2xl shadow-xl p-3 flex flex-col lg:flex-row lg:items-center gap-3">
-          <StopwatchControl sw={sw} lapTime={form.lapTime} />
+          <StopwatchControl sw={sw} lapTime={form.lapTime} highlightStart={readyAck && sw.status === 'idle'} />
           <div className="flex items-center gap-3 flex-1 min-w-0">
           <div className="flex-1 grid grid-cols-4 text-center">
             <Mini label="Mission" value={mission} tone="text-emerald-700" />
