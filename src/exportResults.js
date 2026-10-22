@@ -15,7 +15,7 @@ const when = (t) => (t ? new Date(t).toLocaleString('ko-KR') : '');
 /** [한국어 제목, 영어 제목, 값 함수] */
 const baseColumns = (roundCol) => [
   ['부문', 'Division', (r) => divisionInfo(divisionKeyOf(r)).label],
-  ['부문 순위', 'Division Rank', (r) => r.rank],
+  ['부문 순위', 'Division Rank', (r) => r.rank ?? '실격 DQ'],
   roundCol,
   ['참가번호', 'Bib No.', (r) => r.bib],
   ['이름', 'Name', (r) => r.name],
@@ -28,6 +28,7 @@ const baseColumns = (roundCol) => [
   ['랩타임 (초)', 'Lap Time (sec)', lap],
   [`시간 점수 (${MAX_TIME})`, `Time Points (${MAX_TIME})`, (r) => r.timeScore],
   [`총점 (${MAX_TOTAL})`, `Total (${MAX_TOTAL})`, (r) => r.totalScore],
+  ['실격', 'DQ', (r) => (r.dq ? '실격 DQ' : '')],
 ];
 const tailColumns = [
   ['심판', 'Judge', (r) => r.judge || ''],
@@ -54,7 +55,11 @@ export async function exportResults(scores) {
   // 1) 시상용: 참가자별 최고 기록 + 차수별 총점
   const bestCols = [
     ...baseColumns(['최고 기록 차수', 'Best Round', (r) => roundInfo(r.bestRound).label]),
-    ...ROUNDS.map((rd) => [`${rd.label} 총점`, `${rd.en} Total`, (r) => r.roundTotals?.[rd.key] ?? '']),
+    ...ROUNDS.map((rd) => [`${rd.label} 총점`, `${rd.en} Total`, (r) => {
+      const t = r.roundTotals?.[rd.key];
+      if (t === undefined) return '';
+      return r.roundDq?.[rd.key] ? `${t} (실격)` : t;
+    }]),
     ...tailColumns,
   ];
   XLSX.utils.book_append_sheet(wb, buildSheet(XLSX, bestPerPerson(scores), bestCols), '시상용(최고기록)');

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Trophy, ClipboardList, Save, Download, Trash2, CheckCircle2, Clock, User, ArrowRight,
   Pencil, X, Lock, Crosshair, Target, Wifi, WifiOff, Loader2, FlaskConical, LogOut,
-  AlertTriangle, Hash, Timer, Play, Square, Undo2, RotateCcw, PenLine,
+  AlertTriangle, Hash, Timer, Play, Square, Undo2, RotateCcw, PenLine, Ban,
 } from 'lucide-react';
 import {
   COMPETITION, ADMIN_PASSWORD, HQ_PASSWORD, OBSTACLES, POINTS_PER_OBSTACLE, LANDING_OPTIONS,
@@ -351,7 +351,7 @@ function RoleCard({ onClick, icon: Icon, color, title, ko, desc, cta }) {
 // =============================================================================
 const blankForm = () => ({
   bib: '', name: '', division: '', country: '', affiliation: '', grade: '', gender: '',
-  obstacles: emptyObstacles(), landingScore: DEFAULT_LANDING, lapTime: '',
+  obstacles: emptyObstacles(), landingScore: DEFAULT_LANDING, lapTime: '', dq: false,
 });
 
 const localPref = {
@@ -870,6 +870,22 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  /** 실격: 초시계를 멈추고 그 시간까지의 기록·점수로 저장 (결과표에 실격 표시) */
+  const disqualify = () => {
+    if (form.dq) return;
+    if (!String(form.bib).trim() && !String(form.name).trim()) return notify('참가자를 먼저 입력하거나 명단에서 선택하세요.');
+    const who = `#${form.bib} ${form.name}`.trim();
+    if (!window.confirm(`${who} 을(를) 실격 처리할까요?\n\n초시계가 멈추고 지금까지의 시간이 자동으로 기록됩니다.\n점수는 지금까지 입력한 점수로 저장되며, 결과표에 '실격'으로 표시됩니다.`)) return;
+    if (sw.status === 'running') sw.stop(); // 정지 → 랩타임 칸 자동 입력
+    setForm((f) => ({ ...f, dq: true }));
+    notify('실격 처리했습니다. 학생 서명을 받은 뒤 제출하세요.', 'success');
+    setTimeout(() => sigSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
+  };
+  const cancelDq = () => {
+    if (!window.confirm('실격을 취소할까요? (초시계 기록은 그대로 둡니다)')) return;
+    setForm((f) => ({ ...f, dq: false }));
+  };
+
   const handleSubmit = async (e, { skipTimerCheck = false } = {}) => {
     e?.preventDefault();
     if (saving) return;
@@ -883,7 +899,7 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
       return notify('학생 서명이 필요합니다. 서명 칸에 서명을 받은 뒤 제출하세요.');
     }
     // 이 참가자에 대해 초시계를 START→STOP 하지 않았다면 한 번 더 확인
-    if (!skipTimerCheck && sw.status !== 'stopped') return setConfirmNoTimer(true);
+    if (!skipTimerCheck && !form.dq && sw.status !== 'stopped') return setConfirmNoTimer(true);
     setConfirmNoTimer(false);
     // 같은 참가자의 같은 차수 기록이 이미 있으면 확인
     const dup = scores.find((s) => personKey(s) === personKey(form) && roundOf(s) === round);
@@ -901,7 +917,7 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
     setSaving(false);
     if (!res.ok) return notify(failMessage(res.reason)); // 입력값은 그대로 유지
 
-    setSubmitted({ bib: form.bib, name: form.name, total, round });
+    setSubmitted({ bib: form.bib, name: form.name, total, round, dq: form.dq });
     sw.reset(); // 다음 참가자를 위해 초시계 초기화
     setHasSignature(false); // 서명 칸은 완료 화면 뒤 새로 열림
     setSigMissing(false);
@@ -923,6 +939,7 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
         <h2 className="mt-6 text-4xl font-black text-slate-900">저장 완료 · Saved</h2>
         <p className="mt-3 text-xl text-slate-700 font-semibold">
           <span className="font-black text-blue-700">{roundInfo(submitted.round).label}</span> · #{submitted.bib} {submitted.name} — <span className="text-emerald-700 font-black">{submitted.total} pts</span>
+          {submitted.dq && <span className="ml-2 inline-block px-2.5 py-0.5 rounded-lg bg-red-600 text-white font-black">실격 DQ</span>}
         </p>
       </div>
     );
@@ -984,6 +1001,21 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
           })}
         </div>
       </div>
+
+      {form.dq && (
+        <div role="alert" className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border-[3px] border-red-600 bg-red-50 px-5 py-4">
+          <Ban size={28} className="text-red-600 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-lg font-black text-red-700">실격 처리됨 · Disqualified</p>
+            <p className="text-sm font-semibold text-red-900">
+              실격 시점까지의 기록({Number(form.lapTime) > 0 ? `${Number(form.lapTime).toFixed(2)}초` : '시간 기록 없음'})과 점수로 저장되고, 결과표에 '실격'으로 표시됩니다. 학생 서명 후 제출하세요.
+            </p>
+          </div>
+          <button type="button" onClick={cancelDq} className="h-11 px-4 rounded-xl border-2 border-red-300 bg-white text-red-700 font-bold hover:bg-red-100">
+            실격 취소
+          </button>
+        </div>
+      )}
 
       {roster.length > 0 && (
         <RosterPicker
@@ -1052,6 +1084,18 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
             <Mini label="Time" value={time} tone="text-blue-700" />
             <Mini label="Total" value={total} tone="text-slate-900" big />
           </div>
+          <button
+            type="button"
+            onClick={disqualify}
+            disabled={form.dq}
+            title="경기를 더 진행할 수 없을 때 실격 처리"
+            className={`h-16 px-4 rounded-xl border-2 font-black flex items-center gap-2 transition active:scale-[0.98] ${
+              form.dq ? 'bg-red-600 border-red-600 text-white cursor-default' : 'bg-white border-red-500 text-red-600 hover:bg-red-50'
+            }`}
+          >
+            <Ban size={22} />
+            <span className="hidden sm:inline">{form.dq ? '실격됨' : '실격'}</span>
+          </button>
           <button
             type="submit"
             disabled={saving || timerRunning}
@@ -1148,7 +1192,7 @@ function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore,
     notify(res.ok ? '전체 기록을 삭제했습니다.' : failMessage(res.reason), res.ok ? 'success' : 'error');
   };
 
-  const top3 = tab === 'all' ? [] : ranked.slice(0, 3);
+  const top3 = tab === 'all' ? [] : ranked.filter((r) => r.rank != null).slice(0, 3);
 
   return (
     <div>
@@ -1254,7 +1298,7 @@ function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore,
                 <p className="text-sm font-semibold text-slate-400 py-2">아직 기록 없음</p>
               ) : (
                 <ol className="space-y-1">
-                  {rows.slice(0, 3).map((r) => (
+                  {rows.filter((r) => r.rank != null).slice(0, 3).map((r) => (
                     <li key={r.id} className="flex items-center gap-2">
                       <span className="w-6 text-center">{['🥇', '🥈', '🥉'][r.rank - 1] || r.rank}</span>
                       <span className="flex-1 min-w-0 font-bold text-slate-900 truncate">{r.name}</span>
@@ -1314,7 +1358,7 @@ function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore,
                 </tr>
               ) : (
                 filtered.map((row) => (
-                  <tr key={row.id} className={`border-t border-slate-200 ${rowTint(tab === 'all' ? 0 : row.rank)}`}>
+                  <tr key={row.id} className={`border-t border-slate-200 ${row.dq ? 'bg-red-50' : rowTint(tab === 'all' ? 0 : row.rank)}`}>
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2">
                         <RankBadge rank={tab === 'all' ? divRank[row.id] : row.rank} />
@@ -1323,7 +1367,10 @@ function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore,
                     </td>
                     <td className="py-3 px-4 font-black text-slate-800 text-lg tabular-nums">{row.bib}</td>
                     <td className="py-3 px-4">
-                      <div className="font-bold text-slate-900 text-lg">{row.name}</div>
+                      <div className="font-bold text-slate-900 text-lg">
+                        {row.name}
+                        {row.dq && <span className="ml-2 align-middle text-xs font-black px-2 py-0.5 rounded-md bg-red-600 text-white">실격 DQ</span>}
+                      </div>
                       {profileLine(row) && <div className="text-xs font-semibold text-slate-500">{profileLine(row)}</div>}
                     </td>
                     <td className="py-3 px-4 text-center">
@@ -1332,7 +1379,7 @@ function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore,
                       </span>
                       {mode === 'best' && (
                         <div className="mt-1 text-xs font-semibold text-slate-500 tabular-nums whitespace-nowrap">
-                          {ROUNDS.map((r) => `${r.label} ${row.roundTotals?.[r.key] ?? '—'}`).join(' · ')}
+                          {ROUNDS.map((r) => `${r.label} ${row.roundTotals?.[r.key] ?? '—'}${row.roundDq?.[r.key] ? '(실격)' : ''}`).join(' · ')}
                         </div>
                       )}
                     </td>
@@ -1384,6 +1431,9 @@ const rowTint = (rank) =>
   rank === 1 ? 'bg-amber-50' : rank === 2 ? 'bg-slate-50' : rank === 3 ? 'bg-orange-50' : 'hover:bg-slate-50';
 
 function RankBadge({ rank }) {
+  if (rank == null) {
+    return <span className="inline-grid place-items-center h-10 px-2.5 rounded-full bg-red-600 text-white font-black text-sm whitespace-nowrap">실격</span>;
+  }
   const cls =
     rank === 1 ? 'bg-amber-400 text-amber-950'
       : rank === 2 ? 'bg-slate-300 text-slate-900'
@@ -1514,6 +1564,20 @@ function EditModal({ record, onClose, onSave }) {
             ))}
           </div>
           <ScoreFields form={form} setForm={setForm} compact />
+          <div className={`mt-5 flex flex-wrap items-center gap-3 rounded-2xl border-2 px-5 py-4 ${form.dq ? 'border-red-500 bg-red-50' : 'border-slate-200 bg-white'}`}>
+            <Ban size={22} className={form.dq ? 'text-red-600' : 'text-slate-500'} />
+            <span className="font-black text-slate-900 mr-auto">
+              실격 · DQ <span className="text-sm font-semibold text-slate-600">— 순위 없이 결과표에 '실격'으로 표시</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, dq: !f.dq }))}
+              aria-pressed={!!form.dq}
+              className={`h-11 px-5 rounded-xl border-2 font-black ${form.dq ? 'bg-red-600 border-red-600 text-white' : 'bg-white border-red-400 text-red-700'}`}
+            >
+              {form.dq ? '실격 해제' : '실격 처리'}
+            </button>
+          </div>
           <div className="mt-5 bg-white border border-slate-200 rounded-2xl p-5">
             <h4 className="flex items-center gap-2 text-lg font-black text-slate-900"><PenLine size={20} /> 학생 서명</h4>
             {record.signature ? (

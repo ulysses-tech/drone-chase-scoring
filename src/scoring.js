@@ -40,8 +40,9 @@ export const computeRow = (item) => {
   };
 };
 
-/** 순위 정렬: 총점 ↓ → 랩타임 ↑ (DNF는 뒤) → 먼저 제출한 순 */
+/** 순위 정렬: 실격은 맨 뒤 → 총점 ↓ → 랩타임 ↑ (DNF는 뒤) → 먼저 제출한 순 */
 export const compareRows = (a, b) => {
+  if (!!a.dq !== !!b.dq) return a.dq ? 1 : -1;
   if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
   const aDnf = a.lapTime <= 0;
   const bDnf = b.lapTime <= 0;
@@ -50,14 +51,20 @@ export const compareRows = (a, b) => {
   return (a.timestamp || 0) - (b.timestamp || 0);
 };
 
-/** 동점자(총점·랩타임 동일)는 같은 순위 */
+/** 동점자(총점·랩타임 동일)는 같은 순위. 실격(dq) 기록은 순위 없음(rank: null) */
 export const rankRows = (rows) => {
   const sorted = rows.map(computeRow).sort(compareRows);
   const ranked = [];
-  sorted.forEach((row, i) => {
-    const prev = ranked[i - 1];
-    const tied = prev && prev.totalScore === row.totalScore && prev.lapTime === row.lapTime;
-    ranked.push({ ...row, rank: tied ? prev.rank : i + 1 });
+  let n = 0;
+  sorted.forEach((row) => {
+    if (row.dq) {
+      ranked.push({ ...row, rank: null });
+      return;
+    }
+    n += 1;
+    const prev = ranked[ranked.length - 1];
+    const tied = prev && !prev.dq && prev.totalScore === row.totalScore && prev.lapTime === row.lapTime;
+    ranked.push({ ...row, rank: tied ? prev.rank : n });
   });
   return ranked;
 };
