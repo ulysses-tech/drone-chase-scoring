@@ -15,7 +15,7 @@ import {
 import { useScores, failMessage } from './useScores';
 import { useStopwatch, msToSeconds, formatMs, formatSeconds } from './useStopwatch';
 import SignatureBox from './SignatureBox';
-import { RosterPicker, RosterManager, DEVICE_ID, claimedByOther, profileLine } from './Roster';
+import { RosterPicker, RosterManager, DEVICE_ID, claimedByOther, profileLine, personKey } from './Roster';
 
 const AUTH_KEY = 'drone_chase_auth_2026';
 const HQ_KEY = 'drone_chase_hq_2026';
@@ -813,7 +813,7 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
     if (timerRunning) return notify('초시계 측정 중에는 참가자를 바꿀 수 없습니다. STOP을 먼저 누르세요.');
     const claim = claims[entry.id];
     if (claimedByOther(claim) && !window.confirm(`${claim.judge || '다른'} 심판이 이 참가자를 채점 중입니다.\n그래도 선택할까요?`)) return;
-    if (scores.some((s) => String(s.bib) === String(entry.bib)) && !window.confirm(`#${entry.bib} ${entry.name} 은(는) 이미 채점이 완료된 참가자입니다.\n다시 채점할까요?`)) return;
+    if (scores.some((s) => personKey(s) === personKey(entry)) && !window.confirm(`#${entry.bib} ${entry.name} 은(는) 이미 채점이 완료된 참가자입니다.\n다시 채점할까요?`)) return;
     const dirty = form.bib || form.name || form.lapTime || form.obstacles.some(Boolean) || sw.status !== 'idle' || hasSignature;
     if (dirty && !window.confirm('지금 입력 중인 내용(점수·초시계·서명)이 지워집니다. 참가자를 바꿀까요?')) return;
 

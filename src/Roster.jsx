@@ -25,6 +25,11 @@ export const DEVICE_ID = (() => {
   return id;
 })();
 
+/** 채점 기록과 명단을 맞춰 보는 열쇠: 참가번호 + 이름 (공백·대소문자 무시)
+ *  번호만으로 비교하면, 예전 시험 기록이나 다른 사람의 같은 번호 기록 때문에 '완료'로 잘못 보일 수 있음 */
+export const personKey = (p) =>
+  `${String(p?.bib ?? '').trim()}|${String(p?.name ?? '').replace(/\s+/g, '').toLowerCase()}`;
+
 /** 다른 기기의 유효한 '채점 중' 표시인지 */
 export const claimedByOther = (claim) =>
   Boolean(claim && claim.device !== DEVICE_ID && Date.now() - (Number(claim.at) || 0) < CLAIM_TTL_MS);
@@ -36,9 +41,9 @@ export const profileLine = (p) =>
     .join(' · ');
 
 /** 명단 항목의 상태: done | busy | mine | wait */
-const statusOf = (entry, { scoredBibs, claims, selectedId }) => {
+const statusOf = (entry, { scoredKeys, claims, selectedId }) => {
   if (entry.id === selectedId) return 'mine';
-  if (entry.bib && scoredBibs.has(String(entry.bib))) return 'done';
+  if (scoredKeys.has(personKey(entry))) return 'done';
   if (claimedByOther(claims[entry.id])) return 'busy';
   return 'wait';
 };
@@ -63,12 +68,12 @@ export function RosterPicker({
   const [showList, setShowList] = useState(false);
   const [query, setQuery] = useState('');
 
-  const scoredBibs = useMemo(() => new Set(scores.map((s) => String(s.bib))), [scores]);
+  const scoredKeys = useMemo(() => new Set(scores.map(personKey)), [scores]);
   const groups = useMemo(() => [...new Set(roster.map((r) => r.group).filter(Boolean))].sort(), [roster]);
   const inGroup = group && groups.includes(group) ? roster.filter((r) => r.group === group) : roster;
-  const ctx = { scoredBibs, claims, selectedId };
+  const ctx = { scoredKeys, claims, selectedId };
 
-  const doneCount = inGroup.filter((r) => r.bib && scoredBibs.has(String(r.bib))).length;
+  const doneCount = inGroup.filter((r) => scoredKeys.has(personKey(r))).length;
   const next = inGroup.find((r) => statusOf(r, ctx) === 'wait');
   const selected = roster.find((r) => r.id === selectedId);
 
@@ -217,9 +222,9 @@ export function RosterManager({ roster, claims, scores, saveRoster, clearRoster,
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
 
-  const scoredBibs = useMemo(() => new Set(scores.map((s) => String(s.bib))), [scores]);
-  const ctx = { scoredBibs, claims, selectedId: null };
-  const done = roster.filter((r) => scoredBibs.has(String(r.bib))).length;
+  const scoredKeys = useMemo(() => new Set(scores.map(personKey)), [scores]);
+  const ctx = { scoredKeys, claims, selectedId: null };
+  const done = roster.filter((r) => scoredKeys.has(personKey(r))).length;
   const inProgress = roster.filter((r) => claimedByOther(claims[r.id])).length;
 
   const onFile = async (e) => {
