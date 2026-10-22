@@ -15,6 +15,7 @@ import {
 import { useScores, failMessage } from './useScores';
 import { useStopwatch, msToSeconds, formatMs, formatSeconds } from './useStopwatch';
 import SignatureBox from './SignatureBox';
+import { RosterPicker, RosterManager, DEVICE_ID, claimedByOther, profileLine } from './Roster';
 
 const AUTH_KEY = 'drone_chase_auth_2026';
 const HQ_KEY = 'drone_chase_hq_2026';
@@ -79,7 +80,17 @@ export default function App() {
 
       <main className="max-w-6xl mx-auto px-4 py-6 sm:px-6 sm:py-10 animate-fade-in" key={view}>
         {view === 'landing' && <LandingView setView={setView} count={store.scores.length} />}
-        {view === 'judge' && <JudgePanel addScore={store.addScore} notify={notify} />}
+        {view === 'judge' && (
+          <JudgePanel
+            addScore={store.addScore}
+            notify={notify}
+            roster={store.roster}
+            claims={store.claims}
+            scores={store.scores}
+            claimParticipant={store.claimParticipant}
+            releaseParticipant={store.releaseParticipant}
+          />
+        )}
         {view === 'dashboard' && (hqAuth ? (
           <Dashboard {...store} notify={notify} />
         ) : (
@@ -335,7 +346,15 @@ function RoleCard({ onClick, icon: Icon, color, title, ko, desc, cta }) {
 // =============================================================================
 //  Shared score fields (Judge Panel & Edit modal)
 // =============================================================================
-const blankForm = () => ({ bib: '', name: '', obstacles: emptyObstacles(), landingScore: DEFAULT_LANDING, lapTime: '' });
+const blankForm = () => ({
+  bib: '', name: '', country: '', affiliation: '', grade: '', gender: '',
+  obstacles: emptyObstacles(), landingScore: DEFAULT_LANDING, lapTime: '',
+});
+
+const localPref = {
+  get: (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } },
+};
 
 function Section({ step, title, icon: Icon, accent, right, children }) {
   const a = {
@@ -716,10 +735,34 @@ const validate = (form) => {
 // =============================================================================
 //  Judge Panel
 // =============================================================================
-function JudgePanel({ addScore, notify }) {
+function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], claimParticipant, releaseParticipant }) {
   const [form, setForm] = useState(blankForm);
   const [saving, setSaving] = useState(false);
   const [submitted, setSubmitted] = useState(null);
+
+  // ── 참가자 명단 연동 ──────────────────────────────────────────────
+  const [judgeName, setJudgeNameState] = useState(() => localPref.get('drone_chase_judge_name'));
+  const setJudgeName = (v) => { setJudgeNameState(v); localPref.set('drone_chase_judge_name', v); };
+  const [group, setGroupState] = useState(() => localPref.get('drone_chase_group'));
+  const setGroup = (v) => { setGroupState(v); localPref.set('drone_chase_group', v); };
+  const [selectedId, setSelectedId] = useState(null);
+  const [selecting, setSelecting] = useState(false);
+  const selectedEntry = roster.find((r) => r.id === selectedId) || null;
+
+  // 다른 화면으로 나가면 '채점 중' 표시 해제
+  const selectedIdRef = useRef(null);
+  selectedIdRef.current = selectedId;
+  useEffect(() => () => { if (selectedIdRef.current) releaseParticipant?.(selectedIdRef.current); }, [releaseParticipant]);
+
+  // 선택한 참가자의 번호·이름을 직접 고치면 명단 연결을 끊음 (명단에 없는 참가자로 취급)
+  useEffect(() => {
+    if (!selectedEntry) return;
+    if (String(form.bib).trim() !== String(selectedEntry.bib) || String(form.name).trim() !== String(selectedEntry.name)) {
+      releaseParticipant?.(selectedEntry.id);
+      setSelectedId(null);
+      setForm((f) => ({ ...f, country: '', affiliation: '', grade: '', gender: '' }));
+    }
+  }, [form.bib, form.name, selectedEntry, releaseParticipant]);
 
   // 경기 시작 준비 알림: 이름이 입력되면 깜빡이고, '확인'을 눌러야 멈춤.
   // 이름이 지워지면(초기화·제출 후 포함) 다시 처음 상태로 돌아감
@@ -763,6 +806,35 @@ function JudgePanel({ addScore, notify }) {
   const [hasSignature, setHasSignature] = useState(false);
   const [sigMissing, setSigMissing] = useState(false);
 
+  /** 명단에서 참가자 선택 → 번호·이름·정보 자동 입력 + 다른 심판에게 '채점 중' 표시 */
+  const selectParticipant = async (entry) => {
+    if (selecting) return;
+    if (!String(judgeName).trim()) return notify('심판 이름을 먼저 입력하세요. (여러 심판이 같은 참가자를 고르지 않도록 표시됩니다)');
+    if (timerRunning) return notify('초시계 측정 중에는 참가자를 바꿀 수 없습니다. STOP을 먼저 누르세요.');
+    const claim = claims[entry.id];
+    if (claimedByOther(claim) && !window.confirm(`${claim.judge || '다른'} 심판이 이 참가자를 채점 중입니다.\n그래도 선택할까요?`)) return;
+    if (scores.some((s) => String(s.bib) === String(entry.bib)) && !window.confirm(`#${entry.bib} ${entry.name} 은(는) 이미 채점이 완료된 참가자입니다.\n다시 채점할까요?`)) return;
+    const dirty = form.bib || form.name || form.lapTime || form.obstacles.some(Boolean) || sw.status !== 'idle' || hasSignature;
+    if (dirty && !window.confirm('지금 입력 중인 내용(점수·초시계·서명)이 지워집니다. 참가자를 바꿀까요?')) return;
+
+    setSelecting(true);
+    const res = await claimParticipant(entry.id, judgeName, DEVICE_ID);
+    setSelecting(false);
+    if (!res.ok) return notify(failMessage(res.reason));
+    if (selectedId && selectedId !== entry.id) releaseParticipant(selectedId);
+
+    sw.reset();
+    sigRef.current?.clear();
+    setSigMissing(false);
+    setSelectedId(entry.id);
+    setForm({
+      ...blankForm(),
+      bib: String(entry.bib), name: String(entry.name),
+      country: entry.country || '', affiliation: entry.affiliation || '', grade: entry.grade || '', gender: entry.gender || '',
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const handleSubmit = async (e, { skipTimerCheck = false } = {}) => {
     e?.preventDefault();
     if (saving) return;
@@ -782,6 +854,8 @@ function JudgePanel({ addScore, notify }) {
     setSaving(true);
     const res = await addScore({
       ...form,
+      judge: judgeName,
+      rosterId: selectedId || undefined,
       obstacles: normalizeObstacles(form.obstacles),
       signature: sigRef.current.toDataURL(),
     });
@@ -792,6 +866,8 @@ function JudgePanel({ addScore, notify }) {
     sw.reset(); // 다음 참가자를 위해 초시계 초기화
     setHasSignature(false); // 서명 칸은 완료 화면 뒤 새로 열림
     setSigMissing(false);
+    if (selectedId) releaseParticipant(selectedId); // 채점 완료 → '채점 중' 표시 해제
+    setSelectedId(null);
     setTimeout(() => {
       setSubmitted(null);
       setForm(blankForm());
@@ -830,12 +906,29 @@ function JudgePanel({ addScore, notify }) {
             sw.reset();
             sigRef.current?.clear();
             setSigMissing(false);
+            if (selectedId) releaseParticipant(selectedId);
+            setSelectedId(null);
           }}
           className="h-10 px-4 rounded-lg text-slate-700 font-bold hover:bg-slate-200"
         >
           초기화 · Clear
         </button>
       </div>
+
+      {roster.length > 0 && (
+        <RosterPicker
+          roster={roster}
+          claims={claims}
+          scores={scores}
+          selectedId={selectedId}
+          judgeName={judgeName}
+          setJudgeName={setJudgeName}
+          group={group}
+          setGroup={setGroup}
+          onSelect={selectParticipant}
+          busy={selecting}
+        />
+      )}
 
       <ScoreFields
         form={form}
@@ -921,7 +1014,7 @@ const csvCell = (v) => {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
-function Dashboard({ scores, updateScore, deleteScore, clearScores, notify }) {
+function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore, clearScores, saveRoster, clearRoster, notify }) {
   const [editingId, setEditingId] = useState(null);
   const [viewSig, setViewSig] = useState(null);
   const [query, setQuery] = useState('');
@@ -934,12 +1027,12 @@ function Dashboard({ scores, updateScore, deleteScore, clearScores, notify }) {
   }, [editingId, editing]);
 
   const filtered = query.trim()
-    ? ranked.filter((r) => `${r.bib} ${r.name}`.toLowerCase().includes(query.trim().toLowerCase()))
+    ? ranked.filter((r) => `${r.bib} ${r.name} ${r.affiliation || ''} ${r.country || ''}`.toLowerCase().includes(query.trim().toLowerCase()))
     : ranked;
 
   const downloadCSV = () => {
-    const header = ['Rank', 'Bib', 'Name', `Mission(${MAX_MISSION})`, `Landing(${MAX_LANDING})`, 'Lap Time(sec)', `Time Pts(${MAX_TIME})`, `Total(${MAX_TOTAL})`, 'Signed'];
-    const rows = ranked.map((s) => [s.rank, s.bib, s.name, s.missionScore, s.landingScore, s.lapTime > 0 ? s.lapTime.toFixed(2) : 'DNF', s.timeScore, s.totalScore, s.signature ? 'Y' : 'N']);
+    const header = ['Rank', 'Bib', 'Name', 'Country', 'Affiliation', 'Grade', 'Gender', `Mission(${MAX_MISSION})`, `Landing(${MAX_LANDING})`, 'Lap Time(sec)', `Time Pts(${MAX_TIME})`, `Total(${MAX_TOTAL})`, 'Judge', 'Signed'];
+    const rows = ranked.map((s) => [s.rank, s.bib, s.name, s.country || '', s.affiliation || '', s.grade || '', s.gender || '', s.missionScore, s.landingScore, s.lapTime > 0 ? s.lapTime.toFixed(2) : 'DNF', s.timeScore, s.totalScore, s.judge || '', s.signature ? 'Y' : 'N']);
     const csv = '﻿' + [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
@@ -957,9 +1050,9 @@ function Dashboard({ scores, updateScore, deleteScore, clearScores, notify }) {
 
   const handleClear = async () => {
     if (!scores.length) return;
-    if (!window.confirm(`⚠️ 전체 ${scores.length}건의 기록을 영구 삭제합니다.\n되돌릴 수 없습니다. 계속할까요?`)) return;
+    if (!window.confirm(`⚠️ 전체 ${scores.length}건의 채점 기록을 영구 삭제합니다.\n(참가자 명단은 유지됩니다.) 되돌릴 수 없습니다. 계속할까요?`)) return;
     if (window.prompt('확인을 위해 RESET 을 입력하세요.') !== 'RESET') return;
-    const res = await clearScores();
+    const res = await clearScores(scores.map((s) => s.id));
     notify(res.ok ? '전체 기록을 삭제했습니다.' : failMessage(res.reason), res.ok ? 'success' : 'error');
   };
 
@@ -997,6 +1090,15 @@ function Dashboard({ scores, updateScore, deleteScore, clearScores, notify }) {
           </button>
         </div>
       </div>
+
+      <RosterManager
+        roster={roster}
+        claims={claims}
+        scores={scores}
+        saveRoster={saveRoster}
+        clearRoster={clearRoster}
+        notify={notify}
+      />
 
       {/* Podium */}
       {top3.length > 0 && (
@@ -1046,7 +1148,10 @@ function Dashboard({ scores, updateScore, deleteScore, clearScores, notify }) {
                   <tr key={row.id} className={`border-t border-slate-200 ${rowTint(row.rank)}`}>
                     <td className="py-3 px-4"><RankBadge rank={row.rank} /></td>
                     <td className="py-3 px-4 font-black text-slate-800 text-lg tabular-nums">{row.bib}</td>
-                    <td className="py-3 px-4 font-bold text-slate-900 text-lg">{row.name}</td>
+                    <td className="py-3 px-4">
+                      <div className="font-bold text-slate-900 text-lg">{row.name}</div>
+                      {profileLine(row) && <div className="text-xs font-semibold text-slate-500">{profileLine(row)}</div>}
+                    </td>
                     <td className="py-3 px-4 text-center"><Chip tone="emerald">{row.missionScore}</Chip></td>
                     <td className="py-3 px-4 text-center"><Chip tone="violet">{row.landingScore}</Chip></td>
                     <td className="py-3 px-4 text-right font-mono font-bold text-slate-800 text-lg tabular-nums">

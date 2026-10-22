@@ -4,7 +4,7 @@
       ".read": true,
       ".write": true,
       "$recordId": {
-        ".validate": "newData.hasChildren(['bib', 'name', 'landingScore', 'lapTime'])"
+        ".validate": "$recordId.beginsWith('_') || newData.hasChildren(['bib', 'name', 'landingScore', 'lapTime'])"
       }
     }
   }
