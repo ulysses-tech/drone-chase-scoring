@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Trophy, ClipboardList, Save, Download, Trash2, CheckCircle2, Clock, User, ArrowRight,
   Pencil, X, Lock, Crosshair, Target, Wifi, WifiOff, Loader2, FlaskConical, LogOut,
-  AlertTriangle, Hash, Timer, Play, Square, Undo2, RotateCcw,
+  AlertTriangle, Hash, Timer, Play, Square, Undo2, RotateCcw, PenLine,
 } from 'lucide-react';
 import {
   COMPETITION, ADMIN_PASSWORD, HQ_PASSWORD, OBSTACLES, POINTS_PER_OBSTACLE, LANDING_OPTIONS,
@@ -14,6 +14,7 @@ import {
 } from './scoring';
 import { useScores, failMessage } from './useScores';
 import { useStopwatch, msToSeconds, formatMs, formatSeconds } from './useStopwatch';
+import SignatureBox from './SignatureBox';
 
 const AUTH_KEY = 'drone_chase_auth_2026';
 const HQ_KEY = 'drone_chase_hq_2026';
@@ -342,6 +343,7 @@ function Section({ step, title, icon: Icon, accent, right, children }) {
     emerald: 'border-emerald-500 text-emerald-800',
     violet: 'border-violet-500 text-violet-800',
     blue: 'border-blue-500 text-blue-800',
+    red: 'border-red-500 text-red-800',
   }[accent];
   return (
     <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
@@ -755,23 +757,41 @@ function JudgePanel({ addScore, notify }) {
   // 초시계를 쓰지 않고 제출하려 할 때 확인 창
   const [confirmNoTimer, setConfirmNoTimer] = useState(false);
 
+  // 학생 서명 (필수)
+  const sigRef = useRef(null);
+  const sigSectionRef = useRef(null);
+  const [hasSignature, setHasSignature] = useState(false);
+  const [sigMissing, setSigMissing] = useState(false);
+
   const handleSubmit = async (e, { skipTimerCheck = false } = {}) => {
     e?.preventDefault();
     if (saving) return;
     if (timerRunning) return notify('초시계가 측정 중입니다. STOP을 누른 뒤 제출하세요.');
     const err = validate(form);
     if (err) return notify(err);
+    // 학생 서명이 없으면 제출 불가
+    if (!sigRef.current || sigRef.current.isEmpty()) {
+      setSigMissing(true);
+      sigSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return notify('학생 서명이 필요합니다. 서명 칸에 서명을 받은 뒤 제출하세요.');
+    }
     // 이 참가자에 대해 초시계를 START→STOP 하지 않았다면 한 번 더 확인
     if (!skipTimerCheck && sw.status !== 'stopped') return setConfirmNoTimer(true);
     setConfirmNoTimer(false);
 
     setSaving(true);
-    const res = await addScore({ ...form, obstacles: normalizeObstacles(form.obstacles) });
+    const res = await addScore({
+      ...form,
+      obstacles: normalizeObstacles(form.obstacles),
+      signature: sigRef.current.toDataURL(),
+    });
     setSaving(false);
     if (!res.ok) return notify(failMessage(res.reason)); // 입력값은 그대로 유지
 
     setSubmitted({ bib: form.bib, name: form.name, total });
     sw.reset(); // 다음 참가자를 위해 초시계 초기화
+    setHasSignature(false); // 서명 칸은 완료 화면 뒤 새로 열림
+    setSigMissing(false);
     setTimeout(() => {
       setSubmitted(null);
       setForm(blankForm());
@@ -808,6 +828,8 @@ function JudgePanel({ addScore, notify }) {
             if (timerRunning && !window.confirm('초시계가 측정 중입니다. 입력값과 초시계를 모두 초기화할까요?')) return;
             setForm(blankForm());
             sw.reset();
+            sigRef.current?.clear();
+            setSigMissing(false);
           }}
           className="h-10 px-4 rounded-lg text-slate-700 font-bold hover:bg-slate-200"
         >
@@ -821,6 +843,31 @@ function JudgePanel({ addScore, notify }) {
         stopwatch={sw}
         afterParticipant={hasName && <ReadyAlert acknowledged={readyAck} onAcknowledge={() => setReadyAck(true)} />}
       />
+
+      {/* 5. 학생 서명 (필수) */}
+      <div ref={sigSectionRef} className="mt-5">
+        <Section
+          step="5"
+          title="Signature · 학생 서명"
+          icon={PenLine}
+          accent={hasSignature ? 'emerald' : 'red'}
+          right={
+            <span className={`text-sm font-black px-3 py-1 rounded-lg ${hasSignature ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-700'}`}>
+              {hasSignature ? '서명 완료' : '필수 · Required'}
+            </span>
+          }
+        >
+          <p className="mb-3 text-sm font-semibold text-slate-700">
+            학생이 점수를 확인한 뒤 아래 칸에 서명합니다. <b className="text-red-700">서명이 있어야 제출할 수 있습니다.</b>
+          </p>
+          <SignatureBox
+            ref={sigRef}
+            height={240}
+            invalid={sigMissing && !hasSignature}
+            onChange={(v) => { setHasSignature(v); if (v) setSigMissing(false); }}
+          />
+        </Section>
+      </div>
 
       {confirmNoTimer && (
         <NoTimerDialog
@@ -876,6 +923,7 @@ const csvCell = (v) => {
 
 function Dashboard({ scores, updateScore, deleteScore, clearScores, notify }) {
   const [editingId, setEditingId] = useState(null);
+  const [viewSig, setViewSig] = useState(null);
   const [query, setQuery] = useState('');
   const ranked = useMemo(() => rankRows(scores), [scores]);
   const editing = editingId ? scores.find((s) => s.id === editingId) : null;
@@ -890,8 +938,8 @@ function Dashboard({ scores, updateScore, deleteScore, clearScores, notify }) {
     : ranked;
 
   const downloadCSV = () => {
-    const header = ['Rank', 'Bib', 'Name', `Mission(${MAX_MISSION})`, `Landing(${MAX_LANDING})`, 'Lap Time(sec)', `Time Pts(${MAX_TIME})`, `Total(${MAX_TOTAL})`];
-    const rows = ranked.map((s) => [s.rank, s.bib, s.name, s.missionScore, s.landingScore, s.lapTime > 0 ? s.lapTime.toFixed(2) : 'DNF', s.timeScore, s.totalScore]);
+    const header = ['Rank', 'Bib', 'Name', `Mission(${MAX_MISSION})`, `Landing(${MAX_LANDING})`, 'Lap Time(sec)', `Time Pts(${MAX_TIME})`, `Total(${MAX_TOTAL})`, 'Signed'];
+    const rows = ranked.map((s) => [s.rank, s.bib, s.name, s.missionScore, s.landingScore, s.lapTime > 0 ? s.lapTime.toFixed(2) : 'DNF', s.timeScore, s.totalScore, s.signature ? 'Y' : 'N']);
     const csv = '﻿' + [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
@@ -919,6 +967,8 @@ function Dashboard({ scores, updateScore, deleteScore, clearScores, notify }) {
 
   return (
     <div>
+      {viewSig && <SignatureViewer row={viewSig} onClose={() => setViewSig(null)} />}
+
       {editing && (
         <EditModal
           record={editing}
@@ -969,7 +1019,7 @@ function Dashboard({ scores, updateScore, deleteScore, clearScores, notify }) {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left min-w-[760px]">
+          <table className="w-full text-left min-w-[900px]">
             <thead className="bg-slate-100 text-slate-700 text-sm font-black">
               <tr>
                 <th className="py-3 px-4">Rank</th>
@@ -980,13 +1030,14 @@ function Dashboard({ scores, updateScore, deleteScore, clearScores, notify }) {
                 <th className="py-3 px-4 text-right">Lap (s)</th>
                 <th className="py-3 px-4 text-center">Time <span className="font-semibold text-slate-500">/{MAX_TIME}</span></th>
                 <th className="py-3 px-4 text-center bg-slate-200">Total <span className="font-semibold text-slate-500">/{MAX_TOTAL}</span></th>
+                <th className="py-3 px-4 text-center">Signature</th>
                 <th className="py-3 px-4 text-center">Edit</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-20 text-center text-slate-600 font-medium">
+                  <td colSpan={10} className="py-20 text-center text-slate-600 font-medium">
                     {ranked.length === 0 ? '아직 기록이 없습니다. Judge Panel에서 점수를 제출하세요.' : '검색 결과가 없습니다.'}
                   </td>
                 </tr>
@@ -1004,6 +1055,20 @@ function Dashboard({ scores, updateScore, deleteScore, clearScores, notify }) {
                     <td className="py-3 px-4 text-center"><Chip tone="blue">{row.timeScore}</Chip></td>
                     <td className="py-3 px-4 text-center bg-slate-50">
                       <span className="text-3xl font-black text-slate-900 tabular-nums">{row.totalScore}</span>
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      {row.signature ? (
+                        <button
+                          onClick={() => setViewSig(row)}
+                          className="inline-block w-28 h-12 rounded-lg border-2 border-slate-200 bg-white hover:border-blue-500 overflow-hidden"
+                          aria-label={`${row.name} 서명 크게 보기`}
+                          title="서명 크게 보기"
+                        >
+                          <img src={row.signature} alt="" className="w-full h-full object-contain" />
+                        </button>
+                      ) : (
+                        <span className="text-sm font-bold text-slate-400">없음</span>
+                      )}
                     </td>
                     <td className="py-3 px-4">
                       <div className="flex justify-center gap-2">
@@ -1041,6 +1106,34 @@ function RankBadge({ rank }) {
 function Chip({ children, tone }) {
   const t = { emerald: 'bg-emerald-100 text-emerald-800', violet: 'bg-violet-100 text-violet-800', blue: 'bg-blue-100 text-blue-800' }[tone];
   return <span className={`inline-block min-w-[2.75rem] px-3 py-1 rounded-lg font-black tabular-nums ${t}`}>{children}</span>;
+}
+
+/** HQ: 서명 크게 보기 */
+function SignatureViewer({ row, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  const when = row.timestamp ? new Date(row.timestamp).toLocaleString('ko-KR') : '';
+  return (
+    <div className="fixed inset-0 z-[120] bg-slate-900/50 flex items-center justify-center p-4 animate-fade-in" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label="Signature" className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-xl font-black text-slate-900 truncate">#{row.bib} {row.name} · 서명</h3>
+            <p className="text-sm font-semibold text-slate-600 tabular-nums">
+              총점 {row.totalScore}점{when ? ` · 제출 ${when}` : ''}
+            </p>
+          </div>
+          <button onClick={onClose} className="w-10 h-10 shrink-0 grid place-items-center rounded-full hover:bg-slate-100 text-slate-700" aria-label="Close"><X size={22} /></button>
+        </div>
+        <div className="p-6 bg-slate-50">
+          <img src={row.signature} alt={`${row.name} 서명`} className="w-full max-h-[60vh] object-contain bg-white rounded-2xl border-2 border-slate-200" />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function PodiumCard({ row }) {
@@ -1117,6 +1210,15 @@ function EditModal({ record, onClose, onSave }) {
 
         <div className="p-4 sm:p-6 overflow-y-auto">
           <ScoreFields form={form} setForm={setForm} compact />
+          <div className="mt-5 bg-white border border-slate-200 rounded-2xl p-5">
+            <h4 className="flex items-center gap-2 text-lg font-black text-slate-900"><PenLine size={20} /> 학생 서명</h4>
+            {record.signature ? (
+              <img src={record.signature} alt="학생 서명" className="mt-3 w-full max-h-40 object-contain rounded-xl border-2 border-slate-200 bg-white" />
+            ) : (
+              <p className="mt-2 text-sm font-semibold text-slate-500">서명 없음</p>
+            )}
+            <p className="mt-2 text-xs font-semibold text-slate-500">서명은 수정해도 그대로 유지됩니다.</p>
+          </div>
           {error && (
             <p className="mt-4 flex items-center gap-2 text-red-700 font-bold"><AlertTriangle size={18} /> {error}</p>
           )}

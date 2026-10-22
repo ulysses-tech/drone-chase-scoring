@@ -55,6 +55,13 @@ npm run dev
 
 다른 Firebase 프로젝트를 쓰려면 `src/firebaseConfig.js` 의 값만 바꾸면 됩니다.
 
+## 학생 서명
+
+- Judge Panel 5번 **Signature · 학생 서명** 칸에 학생이 손가락(또는 펜·마우스)으로 서명합니다. **서명이 없으면 제출되지 않습니다.**
+- 서명은 점수 기록과 함께 Firebase에 저장되고, HQ Dashboard의 **Signature** 칸에서 작게 보이며 누르면 크게 볼 수 있습니다.
+- HQ에서 점수를 수정해도 서명은 그대로 유지됩니다. CSV에는 서명 여부(Y/N)만 표시됩니다.
+- 서명 패드 코드는 `src/SignatureBox.jsx` 에 있습니다 (idrcc-scoring 과 같은 라이브러리 `react-signature-canvas`).
+
 ## 초시계 사용법
 
 - 채점 화면 하단 고정 바의 **START → STOP**. STOP을 누르면 랩타임 칸에 초 단위(소수 둘째 자리)로 자동 입력됩니다.

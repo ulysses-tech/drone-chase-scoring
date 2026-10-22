@@ -115,6 +115,8 @@ export function useScores() {
 
   const addScore = useCallback(async (record) => {
     const data = { ...pickFields(record), timestamp: Date.now() };
+    // 학생 서명 이미지(PNG data URL) — 수정(update) 때는 건드리지 않아 그대로 유지됨
+    if (record.signature) data.signature = record.signature;
     if (!isCloudMode || !db) {
       writeLocal([...readLocal(), { id: crypto.randomUUID?.() || String(Date.now()), ...data }]);
       return { ok: true };
