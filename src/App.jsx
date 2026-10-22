@@ -367,7 +367,7 @@ function PtsTag({ children, tone }) {
   return <span className={`text-sm font-black px-3 py-1 rounded-lg ${t}`}>{children}</span>;
 }
 
-function ScoreFields({ form, setForm, compact = false, stopwatch }) {
+function ScoreFields({ form, setForm, compact = false, stopwatch, afterParticipant }) {
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
   const toggleObstacle = (i) =>
     setForm((f) => {
@@ -411,6 +411,9 @@ function ScoreFields({ form, setForm, compact = false, stopwatch }) {
           </div>
         </div>
       </Section>
+
+      {/* 1번과 2번 사이 (Judge Panel 에서만 전달됨) */}
+      {afterParticipant}
 
       {/* 2. Mission */}
       <Section
@@ -524,6 +527,39 @@ function ScoreFields({ form, setForm, compact = false, stopwatch }) {
   );
 }
 
+/**
+ * 경기 시작 준비 알림 — 이름이 입력되면 나타나 깜빡이고,
+ * 심판이 '확인' 칸을 눌러야 깜빡임이 멈춤 (초시계 없이 경기를 시작하는 것을 방지)
+ */
+function ReadyAlert({ acknowledged, onAcknowledge }) {
+  return (
+    <div
+      role="alert"
+      className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 px-5 sm:px-6 py-4 transition-colors ${
+        acknowledged ? 'bg-emerald-50 border-emerald-300' : 'bg-red-50 border-red-400'
+      }`}
+    >
+      <p className={`text-lg font-black leading-snug ${acknowledged ? 'text-emerald-800' : 'text-red-600 animate-blink'}`}>
+        ※ 학생의 경기 시작 준비가 완료되었습니다. 심판은 초시계를 준비하세요!
+      </p>
+      <button
+        type="button"
+        onClick={onAcknowledge}
+        disabled={acknowledged}
+        aria-pressed={acknowledged}
+        className={`shrink-0 h-12 px-4 rounded-xl border-2 font-black flex items-center gap-2 transition active:scale-95 ${
+          acknowledged
+            ? 'bg-emerald-600 border-emerald-600 text-white cursor-default'
+            : 'bg-white border-red-500 text-red-600 hover:bg-red-100'
+        }`}
+      >
+        {acknowledged ? <CheckCircle2 size={20} /> : <span className="w-5 h-5 rounded-md border-2 border-red-500" />}
+        {acknowledged ? '확인 완료' : '확인'}
+      </button>
+    </div>
+  );
+}
+
 function TimerStatusChip({ status }) {
   const map = {
     idle: ['bg-slate-100 text-slate-700 border-slate-300', 'Ready'],
@@ -628,6 +664,14 @@ function JudgePanel({ addScore, notify }) {
   const [saving, setSaving] = useState(false);
   const [submitted, setSubmitted] = useState(null);
 
+  // 경기 시작 준비 알림: 이름이 입력되면 깜빡이고, '확인'을 눌러야 멈춤.
+  // 이름이 지워지면(초기화·제출 후 포함) 다시 처음 상태로 돌아감
+  const hasName = String(form.name).trim() !== '';
+  const [readyAck, setReadyAck] = useState(false);
+  useEffect(() => {
+    if (!hasName) setReadyAck(false);
+  }, [hasName]);
+
   // 초시계: 정지하면 랩타임 칸에 자동 입력 (초 단위, 소수 둘째 자리)
   const sw = useStopwatch((ms) => setForm((f) => ({ ...f, lapTime: msToSeconds(ms).toFixed(2) })));
   const swRef = useRef(sw);
@@ -710,7 +754,12 @@ function JudgePanel({ addScore, notify }) {
         </button>
       </div>
 
-      <ScoreFields form={form} setForm={setForm} stopwatch={sw} />
+      <ScoreFields
+        form={form}
+        setForm={setForm}
+        stopwatch={sw}
+        afterParticipant={hasName && <ReadyAlert acknowledged={readyAck} onAcknowledge={() => setReadyAck(true)} />}
+      />
 
       {/* 하단 고정: 초시계 + 실시간 합계 + 제출 */}
       <div className="sticky bottom-3 mt-6 z-40" style={{ marginBottom: 'env(safe-area-inset-bottom)' }}>
