@@ -1,3 +1,4 @@
+import { saveWorkbook } from './saveWorkbook';
 import { matchDivision } from './divisions';
 
 // =============================================================================
@@ -24,7 +25,20 @@ const ALIAS_LOOKUP = Object.fromEntries(
   Object.entries(HEADER_ALIASES).flatMap(([key, names]) => names.map((n) => [norm(n), key]))
 );
 
+/** 제목 칸 → 항목. '참가번호\nBib No.' 처럼 한 칸에 두 줄로 적어도 인식 */
+const headerKey = (c) => {
+  const whole = ALIAS_LOOKUP[norm(c)];
+  if (whole) return whole;
+  for (const part of String(c ?? '').split(/[\n/]/)) {
+    const k = ALIAS_LOOKUP[norm(part)];
+    if (k) return k;
+  }
+  return undefined;
+};
+
+/** 양식 제목: 1행 한국어, 2행 영어 */
 export const TEMPLATE_HEADERS = ['순서', '참가번호', '이름', '부문', '국가', '소속', '학년', '성별', '조'];
+export const TEMPLATE_HEADERS_EN = ['Order', 'Bib No.', 'Name', 'Division', 'Country', 'Affiliation', 'Grade', 'Gender', 'Group'];
 
 /**
  * 파일을 읽어 { entries, warnings, columns } 를 돌려줍니다.
@@ -39,12 +53,12 @@ export async function parseRosterFile(file) {
   if (!rows.length) throw new Error('파일에 내용이 없습니다.');
 
   // 제목 줄 찾기: 위에서 10줄 안에서 '이름'이나 '참가번호'가 있는 첫 줄
-  let headerIdx = rows.slice(0, 10).findIndex((r) => r.some((c) => ['name', 'bib'].includes(ALIAS_LOOKUP[norm(c)])));
+  const headerIdx = rows.slice(0, 10).findIndex((r) => r.some((c) => ['name', 'bib'].includes(headerKey(c))));
   if (headerIdx < 0) throw new Error("제목 줄을 찾지 못했습니다. 첫 줄에 '참가번호', '이름' 같은 제목을 넣어 주세요.");
 
   const colMap = {};
   rows[headerIdx].forEach((c, i) => {
-    const key = ALIAS_LOOKUP[norm(c)];
+    const key = headerKey(c);
     if (key && colMap[key] === undefined) colMap[key] = i;
   });
   if (colMap.name === undefined && colMap.bib === undefined) {
@@ -53,7 +67,14 @@ export async function parseRosterFile(file) {
 
   const warnings = [];
   const entries = [];
-  rows.slice(headerIdx + 1).forEach((r, i) => {
+  // 제목 바로 아래 줄이 영어 제목 줄(Order, Bib No., Name …)이면 건너뜀
+  let dataStart = headerIdx + 1;
+  const nextRow = rows[dataStart] || [];
+  const filled = nextRow.filter((c) => String(c).trim() !== '');
+  if (filled.length && filled.every((c) => headerKey(c))) dataStart += 1;
+
+  rows.slice(dataStart).forEach((r, i) => {
+    const line = dataStart + i + 1; // 엑셀의 줄 번호
     const get = (k) => (colMap[k] === undefined ? '' : String(r[colMap[k]] ?? '').trim());
     const e = {
       order: get('order'),
@@ -70,10 +91,10 @@ export async function parseRosterFile(file) {
     const divText = get('division');
     e.division = matchDivision(divText) || matchDivision(e.grade);
     if (!e.division) {
-      warnings.push(`${headerIdx + i + 2}번째 줄 (${e.name || e.bib}): 부문을 알 수 없습니다${divText ? ` ('${divText}')` : ''}. 심판 화면에서 부문을 골라야 합니다.`);
+      warnings.push(`${line}번째 줄 (${e.name || e.bib}): 부문을 알 수 없습니다${divText ? ` ('${divText}')` : ''}. 심판 화면에서 부문을 골라야 합니다.`);
     }
-    if (!e.name) warnings.push(`${headerIdx + i + 2}번째 줄: 이름이 비어 있습니다.`);
-    if (!e.bib) warnings.push(`${headerIdx + i + 2}번째 줄: 참가번호가 비어 있습니다.`);
+    if (!e.name) warnings.push(`${line}번째 줄: 이름이 비어 있습니다.`);
+    if (!e.bib) warnings.push(`${line}번째 줄: 참가번호가 비어 있습니다.`);
     entries.push(e);
   });
 
@@ -95,18 +116,19 @@ export async function parseRosterFile(file) {
 }
 
 /** 빈 양식(.xlsx) 내려받기 — 예시 3줄 포함 */
-export async function downloadRosterTemplate(filename = 'Drone_Chase_명단양식.xlsx') {
+export async function downloadRosterTemplate(filename = 'Drone_Chase_Roster_Template.xlsx') {
   const XLSX = await import('xlsx');
   const data = [
     TEMPLATE_HEADERS,
+    TEMPLATE_HEADERS_EN,
     [1, '101', '(예시) 홍길동', '초등부', 'Korea', 'OO초등학교', '6', '남', 'A'],
     [2, '102', '(예시) 김하늘', '중등부', 'Korea', '광신중학교', '중2', '여', 'A'],
     [3, '103', '(예시) Bat-Erdene', '고등부', 'Mongolia', 'MNUE Lab School', '고1', 'M', 'B'],
     [4, '104', '(예시) Nguyen An', '일반부', 'Vietnam', 'Hanoi University', '대3', 'F', 'B'],
   ];
   const ws = XLSX.utils.aoa_to_sheet(data);
-  ws['!cols'] = [{ wch: 6 }, { wch: 10 }, { wch: 22 }, { wch: 8 }, { wch: 12 }, { wch: 22 }, { wch: 6 }, { wch: 6 }, { wch: 6 }];
+  ws['!cols'] = [{ wch: 8 }, { wch: 10 }, { wch: 22 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 8 }, { wch: 8 }, { wch: 8 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '명단');
-  XLSX.writeFile(wb, filename);
+  saveWorkbook(XLSX, wb, filename);
 }

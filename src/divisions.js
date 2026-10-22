@@ -1,4 +1,5 @@
 import { DIVISIONS } from './config';
+import { rankRows } from './scoring';
 
 // 부문별 배지 색 (config.js 의 DIVISIONS 순서대로)
 const COLORS = [
@@ -35,3 +36,16 @@ export const divisionInfo = (key) => {
   if (i < 0) return { key: UNASSIGNED, label: '미분류', en: 'Unassigned', color: 'bg-slate-100 text-slate-600 border-slate-300' };
   return { ...DIVISIONS[i], color: COLORS[i % COLORS.length] };
 };
+
+/** 기록의 부문 key (없거나 모르는 부문이면 UNASSIGNED) */
+export const divisionKeyOf = (r) => (DIVISIONS.some((d) => d.key === r?.division) ? r.division : UNASSIGNED);
+
+/** 부문별로 나눠 각 부문 안에서 순위를 매김 → { elementary: [...], middle: [...], ..., _none?: [...] } */
+export function groupByDivision(rows) {
+  const out = {};
+  [...DIVISIONS.map((d) => d.key), UNASSIGNED].forEach((k) => {
+    const list = rows.filter((r) => divisionKeyOf(r) === k);
+    if (list.length || k !== UNASSIGNED) out[k] = rankRows(list);
+  });
+  return out;
+}

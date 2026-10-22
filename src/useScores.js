@@ -48,6 +48,7 @@ const pickFields = (r) => ({
   name: str(r.name),
   ...Object.fromEntries(PROFILE_FIELDS.map((k) => [k, str(r[k])])),
   judge: str(r.judge),
+  round: str(r.round) || '1',
   obstacles: Array.isArray(r.obstacles) ? r.obstacles.map(Boolean) : [],
   landingScore: Number(r.landingScore) || 0,
   lapTime: Number(r.lapTime) || 0,

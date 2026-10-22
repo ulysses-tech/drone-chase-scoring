@@ -6,9 +6,11 @@ import {
 } from 'lucide-react';
 import {
   COMPETITION, ADMIN_PASSWORD, HQ_PASSWORD, OBSTACLES, POINTS_PER_OBSTACLE, LANDING_OPTIONS,
-  DEFAULT_LANDING, TIME_BRACKETS, TIME_POINTS_INCOMPLETE, CSV_FILENAME, DIVISIONS,
+  DEFAULT_LANDING, TIME_BRACKETS, TIME_POINTS_INCOMPLETE, RESULT_FILENAME, DIVISIONS, ROUNDS,
 } from './config';
-import { divisionInfo, UNASSIGNED } from './divisions';
+import { roundOf, roundInfo, bestPerPerson } from './rounds';
+import { divisionInfo, groupByDivision } from './divisions';
+import { exportResults } from './exportResults';
 import {
   MAX_MISSION, MAX_LANDING, MAX_TIME, MAX_TOTAL, emptyObstacles, normalizeObstacles,
   missionScoreOf, timeScoreOf, rankRows,
@@ -312,7 +314,7 @@ function LandingView({ setView, count }) {
           color="blue"
           title="HQ Dashboard"
           ko="본부 순위표"
-          desc={`실시간 순위 · 수정/삭제 · CSV 저장  (현재 ${count}건)`}
+          desc={`실시간 순위 · 수정/삭제 · 결과 엑셀 저장  (현재 ${count}건)`}
           cta="순위 보기"
         />
       </div>
@@ -771,6 +773,12 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
   const [judgeName, setJudgeNameState] = useState(() => localPref.get('drone_chase_judge_name'));
   const setJudgeName = (v) => { setJudgeNameState(v); localPref.set('drone_chase_judge_name', v); };
   const [group, setGroupState] = useState(() => localPref.get('drone_chase_group'));
+  // 차수(1차·2차): 기기에 기억 — 보통 1차를 모두 마친 뒤 2차로 바꿈
+  const [round, setRoundState] = useState(() => {
+    const v = localPref.get('drone_chase_round');
+    return ROUNDS.some((r) => r.key === v) ? v : ROUNDS[0].key;
+  });
+  const setRound = (v) => { setRoundState(v); localPref.set('drone_chase_round', v); };
   const setGroup = (v) => { setGroupState(v); localPref.set('drone_chase_group', v); };
   const [selectedId, setSelectedId] = useState(null);
   const [selecting, setSelecting] = useState(false);
@@ -840,7 +848,7 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
     if (timerRunning) return notify('초시계 측정 중에는 참가자를 바꿀 수 없습니다. STOP을 먼저 누르세요.');
     const claim = claims[entry.id];
     if (claimedByOther(claim) && !window.confirm(`${claim.judge || '다른'} 심판이 이 참가자를 채점 중입니다.\n그래도 선택할까요?`)) return;
-    if (scores.some((s) => personKey(s) === personKey(entry)) && !window.confirm(`#${entry.bib} ${entry.name} 은(는) 이미 채점이 완료된 참가자입니다.\n다시 채점할까요?`)) return;
+    if (scores.some((s) => personKey(s) === personKey(entry) && roundOf(s) === round) && !window.confirm(`#${entry.bib} ${entry.name} 은(는) 이미 ${roundInfo(round).label} 채점이 완료된 참가자입니다.\n다시 채점할까요?`)) return;
     const dirty = form.bib || form.name || form.lapTime || form.obstacles.some(Boolean) || sw.status !== 'idle' || hasSignature;
     if (dirty && !window.confirm('지금 입력 중인 내용(점수·초시계·서명)이 지워집니다. 참가자를 바꿀까요?')) return;
 
@@ -877,10 +885,14 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
     // 이 참가자에 대해 초시계를 START→STOP 하지 않았다면 한 번 더 확인
     if (!skipTimerCheck && sw.status !== 'stopped') return setConfirmNoTimer(true);
     setConfirmNoTimer(false);
+    // 같은 참가자의 같은 차수 기록이 이미 있으면 확인
+    const dup = scores.find((s) => personKey(s) === personKey(form) && roundOf(s) === round);
+    if (dup && !window.confirm(`#${form.bib} ${form.name} 의 ${roundInfo(round).label} 기록이 이미 있습니다.\n그래도 제출할까요? (HQ에서 하나를 지워야 할 수 있습니다)`)) return;
 
     setSaving(true);
     const res = await addScore({
       ...form,
+      round,
       judge: judgeName,
       rosterId: selectedId || undefined,
       obstacles: normalizeObstacles(form.obstacles),
@@ -889,7 +901,7 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
     setSaving(false);
     if (!res.ok) return notify(failMessage(res.reason)); // 입력값은 그대로 유지
 
-    setSubmitted({ bib: form.bib, name: form.name, total });
+    setSubmitted({ bib: form.bib, name: form.name, total, round });
     sw.reset(); // 다음 참가자를 위해 초시계 초기화
     setHasSignature(false); // 서명 칸은 완료 화면 뒤 새로 열림
     setSigMissing(false);
@@ -910,7 +922,7 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
         </span>
         <h2 className="mt-6 text-4xl font-black text-slate-900">저장 완료 · Saved</h2>
         <p className="mt-3 text-xl text-slate-700 font-semibold">
-          #{submitted.bib} {submitted.name} — <span className="text-emerald-700 font-black">{submitted.total} pts</span>
+          <span className="font-black text-blue-700">{roundInfo(submitted.round).label}</span> · #{submitted.bib} {submitted.name} — <span className="text-emerald-700 font-black">{submitted.total} pts</span>
         </p>
       </div>
     );
@@ -942,6 +954,37 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
         </button>
       </div>
 
+      {/* 차수 선택 (1차·2차) */}
+      <div className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border-2 border-slate-900 bg-white px-5 py-4">
+        <span className="text-lg font-black text-slate-900 mr-auto">
+          경기 차수 <span className="text-sm font-bold text-slate-500">· Round</span>
+        </span>
+        <div className="flex gap-2" role="radiogroup" aria-label="Round">
+          {ROUNDS.map((r) => {
+            const on = round === r.key;
+            return (
+              <button
+                key={r.key}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                onClick={() => {
+                  if (on) return;
+                  if (timerRunning) return notify('초시계 측정 중에는 차수를 바꿀 수 없습니다.');
+                  setRound(r.key);
+                }}
+                className={`h-14 min-w-[6.5rem] px-5 rounded-xl border-2 font-black text-xl transition active:scale-[0.97] ${
+                  on ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-600/25' : 'bg-white border-slate-300 text-slate-700 hover:border-blue-400'
+                }`}
+              >
+                {r.label}
+                <span className={`block text-[11px] font-bold leading-none ${on ? 'text-blue-100' : 'text-slate-500'}`}>{r.en}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {roster.length > 0 && (
         <RosterPicker
           roster={roster}
@@ -954,6 +997,7 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
           setGroup={setGroup}
           onSelect={selectParticipant}
           busy={selecting}
+          round={round}
         />
       )}
 
@@ -1036,28 +1080,24 @@ function Mini({ label, value, tone, big }) {
 // =============================================================================
 //  HQ Dashboard
 // =============================================================================
-const csvCell = (v) => {
-  const s = String(v ?? '');
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
 
 function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore, clearScores, saveRoster, clearRoster, notify }) {
   const [editingId, setEditingId] = useState(null);
   const [viewSig, setViewSig] = useState(null);
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState('all'); // 'all' | 부문 key
+  // 보기: best = 참가자별 최고 기록(시상용) | '1' · '2' = 해당 차수만 | all = 모든 기록
+  const [mode, setMode] = useState('best');
+
+  const base = useMemo(() => {
+    if (mode === 'best') return bestPerPerson(scores);
+    if (mode === 'all') return scores;
+    return scores.filter((s) => roundOf(s) === mode);
+  }, [scores, mode]);
 
   // 부문별 순위 (같은 부문 안에서만 순위를 매김)
-  const byDivision = useMemo(() => {
-    const keys = [...DIVISIONS.map((d) => d.key), UNASSIGNED];
-    const out = {};
-    keys.forEach((k) => {
-      const rows = scores.filter((s) => (DIVISIONS.some((d) => d.key === s.division) ? s.division : UNASSIGNED) === k);
-      if (rows.length || k !== UNASSIGNED) out[k] = rankRows(rows);
-    });
-    return out;
-  }, [scores]);
-  const overall = useMemo(() => rankRows(scores), [scores]);
+  const byDivision = useMemo(() => groupByDivision(base), [base]);
+  const overall = useMemo(() => rankRows(base), [base]);
   const divRank = useMemo(() => {
     const m = {};
     Object.values(byDivision).forEach((rows) => rows.forEach((r) => { m[r.id] = r.rank; }));
@@ -1081,22 +1121,17 @@ function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore,
     ? ranked.filter((r) => `${r.bib} ${r.name} ${r.affiliation || ''} ${r.country || ''}`.toLowerCase().includes(query.trim().toLowerCase()))
     : ranked;
 
-  const downloadCSV = () => {
-    // 부문 순서대로, 부문 안에서는 순위대로 (시상용)
-    const header = ['Division', 'Division Rank', 'Bib', 'Name', 'Country', 'Affiliation', 'Grade', 'Gender', `Mission(${MAX_MISSION})`, `Landing(${MAX_LANDING})`, 'Lap Time(sec)', `Time Pts(${MAX_TIME})`, `Total(${MAX_TOTAL})`, 'Overall Rank', 'Judge', 'Signed'];
-    const overallRank = Object.fromEntries(overall.map((r) => [r.id, r.rank]));
-    const rows = Object.entries(byDivision).flatMap(([k, list]) => list.map((s) => [
-      divisionInfo(k).label, s.rank, s.bib, s.name, s.country || '', s.affiliation || '', s.grade || '', s.gender || '',
-      s.missionScore, s.landingScore, s.lapTime > 0 ? s.lapTime.toFixed(2) : 'DNF', s.timeScore, s.totalScore,
-      overallRank[s.id], s.judge || '', s.signature ? 'Y' : 'N',
-    ]));
-    const csv = '﻿' + [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = CSV_FILENAME;
-    a.click();
-    URL.revokeObjectURL(url);
+  const [exporting, setExporting] = useState(false);
+  const downloadExcel = async () => {
+    setExporting(true);
+    try {
+      await exportResults(scores);
+    } catch (e) {
+      console.error(e);
+      notify('엑셀 파일을 만들지 못했습니다.');
+    } finally {
+      setExporting(false);
+    }
   };
 
   const handleDelete = async (row) => {
@@ -1136,13 +1171,15 @@ function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore,
           <h2 className="text-3xl font-black text-slate-900 flex items-center gap-3">
             <Trophy className="text-amber-500" size={32} /> Live Leaderboard
           </h2>
-          <p className="text-slate-600 font-medium mt-1">실시간 순위 · 총 {overall.length}명 · 만점 {MAX_TOTAL}점 · 부문별 시상</p>
+          <p className="text-slate-600 font-medium mt-1">
+            실시간 순위 · {mode === 'all' ? `기록 ${overall.length}건` : `${overall.length}명`} · 만점 {MAX_TOTAL}점 · 부문별 시상
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button onClick={downloadCSV} disabled={!overall.length} className="h-12 px-5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold flex items-center gap-2">
-            <Download size={18} /> CSV 저장
+          <button onClick={downloadExcel} disabled={!scores.length || exporting} className="h-12 px-5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold flex items-center gap-2">
+            {exporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />} 결과 엑셀 저장
           </button>
-          <button onClick={handleClear} disabled={!overall.length} className="h-12 px-5 rounded-xl bg-white border-2 border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-40 font-bold flex items-center gap-2">
+          <button onClick={handleClear} disabled={!scores.length} className="h-12 px-5 rounded-xl bg-white border-2 border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-40 font-bold flex items-center gap-2">
             <Trash2 size={18} /> 전체 삭제
           </button>
         </div>
@@ -1156,6 +1193,31 @@ function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore,
         clearRoster={clearRoster}
         notify={notify}
       />
+
+      {/* 보기 선택: 최고 기록(시상용) · 1차 · 2차 · 전체 기록 */}
+      <div className="mb-3 inline-flex flex-wrap gap-1 p-1 rounded-2xl bg-slate-200/70" role="radiogroup" aria-label="기록 보기">
+        {[['best', '최고 기록', 'Best · 시상용'], ...ROUNDS.map((r) => [r.key, r.label, r.en]), ['all', '전체 기록', 'All Rounds']].map(([k, label, en]) => (
+          <button
+            key={k}
+            role="radio"
+            aria-checked={mode === k}
+            onClick={() => setMode(k)}
+            className={`h-14 px-4 rounded-xl font-black leading-tight transition ${
+              mode === k ? 'bg-white text-slate-900 shadow' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            {label}
+            <span className="block text-[11px] font-bold text-slate-500">{en}</span>
+          </button>
+        ))}
+      </div>
+      <p className="mb-4 text-sm font-semibold text-slate-600">
+        {mode === 'best'
+          ? `참가자마다 ${ROUNDS.map((r) => r.label).join('·')} 중 더 좋은 기록(총점 → 랩타임 순)으로 순위를 매깁니다. 시상은 이 순위로 합니다.`
+          : mode === 'all'
+            ? '모든 차수의 기록을 한꺼번에 보여 줍니다. 한 참가자가 여러 줄로 나올 수 있습니다.'
+            : `${roundInfo(mode).label} 기록만으로 매긴 순위입니다.`}
+      </p>
 
       {/* 부문 탭 */}
       <div className="mb-5 flex flex-wrap gap-2" role="tablist" aria-label="부문">
@@ -1227,12 +1289,13 @@ function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore,
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left min-w-[900px]">
+          <table className="w-full text-left min-w-[1000px]">
             <thead className="bg-slate-100 text-slate-700 text-sm font-black">
               <tr>
                 <th className="py-3 px-4">{tab === 'all' ? '부문 순위' : 'Rank'}</th>
                 <th className="py-3 px-4">Bib</th>
                 <th className="py-3 px-4">Name</th>
+                <th className="py-3 px-4 text-center">{mode === 'best' ? '최고 차수' : '차수'}</th>
                 <th className="py-3 px-4 text-center">Mission <span className="font-semibold text-slate-500">/{MAX_MISSION}</span></th>
                 <th className="py-3 px-4 text-center">Landing <span className="font-semibold text-slate-500">/{MAX_LANDING}</span></th>
                 <th className="py-3 px-4 text-right">Lap (s)</th>
@@ -1245,7 +1308,7 @@ function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore,
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-20 text-center text-slate-600 font-medium">
+                  <td colSpan={11} className="py-20 text-center text-slate-600 font-medium">
                     {ranked.length === 0 ? '아직 기록이 없습니다. Judge Panel에서 점수를 제출하세요.' : '검색 결과가 없습니다.'}
                   </td>
                 </tr>
@@ -1262,6 +1325,16 @@ function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore,
                     <td className="py-3 px-4">
                       <div className="font-bold text-slate-900 text-lg">{row.name}</div>
                       {profileLine(row) && <div className="text-xs font-semibold text-slate-500">{profileLine(row)}</div>}
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      <span className="inline-block text-sm font-black px-2.5 py-1 rounded-lg bg-blue-50 text-blue-800 border border-blue-200">
+                        {roundInfo(mode === 'best' ? row.bestRound : roundOf(row)).label}
+                      </span>
+                      {mode === 'best' && (
+                        <div className="mt-1 text-xs font-semibold text-slate-500 tabular-nums whitespace-nowrap">
+                          {ROUNDS.map((r) => `${r.label} ${row.roundTotals?.[r.key] ?? '—'}`).join(' · ')}
+                        </div>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-center"><Chip tone="emerald">{row.missionScore}</Chip></td>
                     <td className="py-3 px-4 text-center"><Chip tone="violet">{row.landingScore}</Chip></td>
@@ -1386,6 +1459,7 @@ function EditModal({ record, onClose, onSave }) {
     ...record,
     obstacles: normalizeObstacles(record.obstacles),
     lapTime: record.lapTime ? String(record.lapTime) : '',
+    round: roundOf(record),
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -1425,6 +1499,20 @@ function EditModal({ record, onClose, onSave }) {
         </div>
 
         <div className="p-4 sm:p-6 overflow-y-auto">
+          <div className="mb-5 flex flex-wrap items-center gap-3 bg-white border border-slate-200 rounded-2xl px-5 py-4">
+            <span className="font-black text-slate-900 mr-auto">경기 차수 · Round</span>
+            {ROUNDS.map((r) => (
+              <button
+                key={r.key}
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, round: r.key }))}
+                aria-pressed={form.round === r.key}
+                className={`h-11 px-5 rounded-xl border-2 font-black ${form.round === r.key ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-700'}`}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
           <ScoreFields form={form} setForm={setForm} compact />
           <div className="mt-5 bg-white border border-slate-200 rounded-2xl p-5">
             <h4 className="flex items-center gap-2 text-lg font-black text-slate-900"><PenLine size={20} /> 학생 서명</h4>

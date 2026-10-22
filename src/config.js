@@ -20,6 +20,12 @@ export const HQ_PASSWORD = 'admin2026';
 // ※ IDRCC 채점 앱이 쓰는 'scores', 'signatures' 와 같은 이름은 쓰지 마세요.
 export const DB_PATH = 'drone_chase_2026';
 
+// 경기 차수 — 참가자마다 1차·2차 기록을 따로 저장하고, 시상은 두 기록 중 더 좋은 기록(최고 기록)으로 합니다.
+export const ROUNDS = [
+  { key: '1', label: '1차', en: '1st Round' },
+  { key: '2', label: '2차', en: '2nd Round' },
+];
+
 // 시상 부문 — HQ 순위가 부문별로 따로 매겨집니다.
 //  label: 화면 표시 이름 / aliases: 엑셀 '부문' 칸에 적을 수 있는 말 (학년 칸의 '초6', '중2', '고1', '대3' 도 자동 인식)
 export const DIVISIONS = [
@@ -29,8 +35,9 @@ export const DIVISIONS = [
   { key: 'general', label: '일반부', en: 'General', aliases: ['일반', '일반부', '대', '대학', '대학생', '대학교', '성인', 'general', 'university', 'college', 'adult', 'open'] },
 ];
 
-// CSV 저장 파일명
-export const CSV_FILENAME = 'Drone_Chase_2026_Results.csv';
+// 결과 엑셀 파일 이름 (뒤에 날짜·시각과 .xlsx 가 붙습니다)
+// ※ 파일 이름은 영문으로 두세요 — 한글 파일 이름은 일부 브라우저에서 'download' 로 바뀌어 저장됩니다.
+export const RESULT_FILENAME = 'Drone_Chase_2026_Results';
 
 // ── 1) 미션(장애물) : 통과한 개수 × 점수 ────────────────────────────────
 export const OBSTACLES = [

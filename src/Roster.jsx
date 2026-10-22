@@ -6,6 +6,11 @@ import {
 import { CLAIM_TTL_MS, failMessage } from './useScores';
 import { parseRosterFile, downloadRosterTemplate } from './rosterFile';
 import { divisionInfo } from './divisions';
+import { personKey } from './scoring';
+import { roundOf, roundInfo } from './rounds';
+import { ROUNDS } from './config';
+
+export { personKey };
 
 /** 부문 배지 (초등부·중등부·고등부·일반부) */
 export function DivisionBadge({ division, size = 'sm' }) {
@@ -33,10 +38,6 @@ export const DEVICE_ID = (() => {
   return id;
 })();
 
-/** 채점 기록과 명단을 맞춰 보는 열쇠: 참가번호 + 이름 (공백·대소문자 무시)
- *  번호만으로 비교하면, 예전 시험 기록이나 다른 사람의 같은 번호 기록 때문에 '완료'로 잘못 보일 수 있음 */
-export const personKey = (p) =>
-  `${String(p?.bib ?? '').trim()}|${String(p?.name ?? '').replace(/\s+/g, '').toLowerCase()}`;
 
 /** 다른 기기의 유효한 '채점 중' 표시인지 */
 export const claimedByOther = (claim) =>
@@ -71,12 +72,16 @@ function StatusChip({ status, claim }) {
 //  심판용: 다음 순서 / 명단에서 선택
 // -----------------------------------------------------------------------------
 export function RosterPicker({
-  roster, claims, scores, selectedId, judgeName, setJudgeName, group, setGroup, onSelect, busy,
+  roster, claims, scores, selectedId, judgeName, setJudgeName, group, setGroup, onSelect, busy, round,
 }) {
   const [showList, setShowList] = useState(false);
   const [query, setQuery] = useState('');
 
-  const scoredKeys = useMemo(() => new Set(scores.map(personKey)), [scores]);
+  // 지금 고른 차수(1차·2차)에서 이미 채점한 참가자
+  const scoredKeys = useMemo(
+    () => new Set(scores.filter((s) => roundOf(s) === round).map(personKey)),
+    [scores, round]
+  );
   const groups = useMemo(() => [...new Set(roster.map((r) => r.group).filter(Boolean))].sort(), [roster]);
   const inGroup = group && groups.includes(group) ? roster.filter((r) => r.group === group) : roster;
   const ctx = { scoredKeys, claims, selectedId };
@@ -97,7 +102,7 @@ export function RosterPicker({
         <div className="flex items-center gap-2 mr-auto">
           <Users size={22} className="text-blue-700" />
           <h3 className="text-lg font-black text-slate-900">참가자 명단</h3>
-          <span className="text-sm font-bold text-slate-600 tabular-nums">완료 {doneCount} / {inGroup.length}</span>
+          <span className="text-sm font-bold text-slate-600 tabular-nums">{roundInfo(round).label} 완료 {doneCount} / {inGroup.length}</span>
         </div>
         <label className="flex flex-col text-xs font-bold text-slate-700">
           심판 이름 · Judge
@@ -148,7 +153,7 @@ export function RosterPicker({
         ) : next ? (
           <div className="flex flex-wrap items-center gap-4">
             <div className="min-w-0 flex-1">
-              <div className="text-xs font-black text-slate-600">다음 순서 · {next.order}번째{next.group ? ` · ${next.group}조` : ''}</div>
+              <div className="text-xs font-black text-slate-600">{roundInfo(round).label} 다음 순서 · {next.order}번째{next.group ? ` · ${next.group}조` : ''}</div>
               <div className="flex items-center gap-2 min-w-0">
                 <DivisionBadge division={next.division} size="lg" />
                 <span className="text-3xl font-black text-slate-900 truncate">
@@ -169,7 +174,7 @@ export function RosterPicker({
           </div>
         ) : (
           <p className="text-lg font-bold text-emerald-700 flex items-center gap-2">
-            <CheckCircle2 size={22} /> {inGroup.length ? '이 명단의 모든 참가자를 채점했거나 다른 심판이 채점 중입니다.' : '명단이 비어 있습니다.'}
+            <CheckCircle2 size={22} /> {inGroup.length ? `${roundInfo(round).label}: 이 명단의 모든 참가자를 채점했거나 다른 심판이 채점 중입니다.` : '명단이 비어 있습니다.'}
           </p>
         )}
 
@@ -250,9 +255,13 @@ export function RosterManager({ roster, claims, scores, saveRoster, clearRoster,
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
 
-  const scoredKeys = useMemo(() => new Set(scores.map(personKey)), [scores]);
-  const ctx = { scoredKeys, claims, selectedId: null };
-  const done = roster.filter((r) => scoredKeys.has(personKey(r))).length;
+  // 차수별 채점 완료 참가자
+  const keysByRound = useMemo(() => {
+    const m = Object.fromEntries(ROUNDS.map((r) => [r.key, new Set()]));
+    scores.forEach((s) => m[roundOf(s)]?.add(personKey(s)));
+    return m;
+  }, [scores]);
+  const doneByRound = ROUNDS.map((rd) => [rd, roster.filter((r) => keysByRound[rd.key].has(personKey(r))).length]);
   const inProgress = roster.filter((r) => claimedByOther(claims[r.id])).length;
 
   const onFile = async (e) => {
@@ -297,7 +306,7 @@ export function RosterManager({ roster, claims, scores, saveRoster, clearRoster,
           <h3 className="text-lg font-black text-slate-900">참가자 명단</h3>
           {roster.length > 0 ? (
             <span className="text-sm font-bold text-slate-600 tabular-nums">
-              {roster.length}명 · 완료 {done} · 채점 중 {inProgress} · 남음 {roster.length - done}
+              {roster.length}명 · {doneByRound.map(([rd, n]) => `${rd.label} 완료 ${n}`).join(' · ')} · 채점 중 {inProgress}
             </span>
           ) : (
             <span className="text-sm font-semibold text-slate-500">아직 없음 — 엑셀로 불러오세요</span>
@@ -340,7 +349,16 @@ export function RosterManager({ roster, claims, scores, saveRoster, clearRoster,
                   <td className="py-2 px-3"><DivisionBadge division={r.division} /></td>
                   <td className="py-2 px-3 text-slate-600">{profileLine(r)}</td>
                   <td className="py-2 px-3">{r.group}</td>
-                  <td className="py-2 px-3"><StatusChip status={statusOf(r, ctx)} claim={claims[r.id]} /></td>
+                  <td className="py-2 px-3">
+                    <div className="flex flex-wrap gap-1">
+                      {ROUNDS.map((rd) => (
+                        <span key={rd.key} className={`text-xs font-black px-2 py-0.5 rounded-md whitespace-nowrap ${keysByRound[rd.key].has(personKey(r)) ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
+                          {rd.label} {keysByRound[rd.key].has(personKey(r)) ? '✓' : '—'}
+                        </span>
+                      ))}
+                      {claimedByOther(claims[r.id]) && <StatusChip status="busy" claim={claims[r.id]} />}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
