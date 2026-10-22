@@ -6,8 +6,9 @@ import {
 } from 'lucide-react';
 import {
   COMPETITION, ADMIN_PASSWORD, HQ_PASSWORD, OBSTACLES, POINTS_PER_OBSTACLE, LANDING_OPTIONS,
-  DEFAULT_LANDING, TIME_BRACKETS, TIME_POINTS_INCOMPLETE, CSV_FILENAME,
+  DEFAULT_LANDING, TIME_BRACKETS, TIME_POINTS_INCOMPLETE, CSV_FILENAME, DIVISIONS,
 } from './config';
+import { divisionInfo, UNASSIGNED } from './divisions';
 import {
   MAX_MISSION, MAX_LANDING, MAX_TIME, MAX_TOTAL, emptyObstacles, normalizeObstacles,
   missionScoreOf, timeScoreOf, rankRows,
@@ -15,7 +16,7 @@ import {
 import { useScores, failMessage } from './useScores';
 import { useStopwatch, msToSeconds, formatMs, formatSeconds } from './useStopwatch';
 import SignatureBox from './SignatureBox';
-import { RosterPicker, RosterManager, DEVICE_ID, claimedByOther, profileLine, personKey } from './Roster';
+import { RosterPicker, RosterManager, DEVICE_ID, claimedByOther, profileLine, personKey, DivisionBadge } from './Roster';
 
 const AUTH_KEY = 'drone_chase_auth_2026';
 const HQ_KEY = 'drone_chase_hq_2026';
@@ -347,7 +348,7 @@ function RoleCard({ onClick, icon: Icon, color, title, ko, desc, cta }) {
 //  Shared score fields (Judge Panel & Edit modal)
 // =============================================================================
 const blankForm = () => ({
-  bib: '', name: '', country: '', affiliation: '', grade: '', gender: '',
+  bib: '', name: '', division: '', country: '', affiliation: '', grade: '', gender: '',
   obstacles: emptyObstacles(), landingScore: DEFAULT_LANDING, lapTime: '',
 });
 
@@ -430,6 +431,31 @@ function ScoreFields({ form, setForm, compact = false, stopwatch, afterParticipa
               className={`${inputBase} h-16 px-4 text-2xl font-bold`}
             />
           </div>
+          {DIVISIONS.length > 0 && (
+            <div className="sm:col-span-3">
+              <span className="block text-sm font-bold text-slate-700 mb-2">Division · 부문 (시상 구분)</span>
+              <div className={`grid gap-2 grid-cols-2 ${DIVISIONS.length >= 4 ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`} role="radiogroup" aria-label="Division">
+                {DIVISIONS.map((d) => {
+                  const on = form.division === d.key;
+                  return (
+                    <button
+                      key={d.key}
+                      type="button"
+                      role="radio"
+                      aria-checked={on}
+                      onClick={() => set({ division: d.key })}
+                      className={`${compact ? 'h-12' : 'h-14'} rounded-xl border-2 font-black text-lg transition active:scale-[0.97] ${
+                        on ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-300 text-slate-800 hover:border-slate-500'
+                      }`}
+                    >
+                      {d.label}
+                      <span className={`ml-1.5 text-xs font-bold ${on ? 'text-slate-300' : 'text-slate-500'}`}>{d.en}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </Section>
 
@@ -726,6 +752,7 @@ function TimeRuleHint() {
 const validate = (form) => {
   if (!String(form.bib).trim()) return '참가번호(Bib)를 입력하세요.';
   if (!String(form.name).trim()) return '이름을 입력하세요.';
+  if (DIVISIONS.length && !DIVISIONS.some((d) => d.key === form.division)) return `부문(${DIVISIONS.map((d) => d.label).join('·')})을 선택하세요.`;
   const t = form.lapTime === '' ? 0 : Number(form.lapTime);
   if (Number.isNaN(t) || t < 0) return '랩타임은 0 이상의 숫자여야 합니다.';
   if (t > 3600) return '랩타임이 너무 큽니다. 초(sec) 단위인지 확인하세요.';
@@ -760,7 +787,7 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
     if (String(form.bib).trim() !== String(selectedEntry.bib) || String(form.name).trim() !== String(selectedEntry.name)) {
       releaseParticipant?.(selectedEntry.id);
       setSelectedId(null);
-      setForm((f) => ({ ...f, country: '', affiliation: '', grade: '', gender: '' }));
+      setForm((f) => ({ ...f, division: '', country: '', affiliation: '', grade: '', gender: '' }));
     }
   }, [form.bib, form.name, selectedEntry, releaseParticipant]);
 
@@ -830,7 +857,7 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
     setForm({
       ...blankForm(),
       bib: String(entry.bib), name: String(entry.name),
-      country: entry.country || '', affiliation: entry.affiliation || '', grade: entry.grade || '', gender: entry.gender || '',
+      division: entry.division || '', country: entry.country || '', affiliation: entry.affiliation || '', grade: entry.grade || '', gender: entry.gender || '',
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -1018,7 +1045,26 @@ function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore,
   const [editingId, setEditingId] = useState(null);
   const [viewSig, setViewSig] = useState(null);
   const [query, setQuery] = useState('');
-  const ranked = useMemo(() => rankRows(scores), [scores]);
+  const [tab, setTab] = useState('all'); // 'all' | 부문 key
+
+  // 부문별 순위 (같은 부문 안에서만 순위를 매김)
+  const byDivision = useMemo(() => {
+    const keys = [...DIVISIONS.map((d) => d.key), UNASSIGNED];
+    const out = {};
+    keys.forEach((k) => {
+      const rows = scores.filter((s) => (DIVISIONS.some((d) => d.key === s.division) ? s.division : UNASSIGNED) === k);
+      if (rows.length || k !== UNASSIGNED) out[k] = rankRows(rows);
+    });
+    return out;
+  }, [scores]);
+  const overall = useMemo(() => rankRows(scores), [scores]);
+  const divRank = useMemo(() => {
+    const m = {};
+    Object.values(byDivision).forEach((rows) => rows.forEach((r) => { m[r.id] = r.rank; }));
+    return m;
+  }, [byDivision]);
+  // 전체 탭: 부문 순서대로 묶고, 부문 안에서는 부문 순위대로
+  const ranked = tab === 'all' ? Object.values(byDivision).flat() : byDivision[tab] || [];
   const editing = editingId ? scores.find((s) => s.id === editingId) : null;
 
   // 수정 중인 기록이 다른 기기에서 삭제되면 모달 닫기
@@ -1026,13 +1072,24 @@ function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore,
     if (editingId && !editing) setEditingId(null);
   }, [editingId, editing]);
 
+  // 탭이 사라진 부문을 가리키면 '전체'로
+  useEffect(() => {
+    if (tab !== 'all' && !byDivision[tab]) setTab('all');
+  }, [tab, byDivision]);
+
   const filtered = query.trim()
     ? ranked.filter((r) => `${r.bib} ${r.name} ${r.affiliation || ''} ${r.country || ''}`.toLowerCase().includes(query.trim().toLowerCase()))
     : ranked;
 
   const downloadCSV = () => {
-    const header = ['Rank', 'Bib', 'Name', 'Country', 'Affiliation', 'Grade', 'Gender', `Mission(${MAX_MISSION})`, `Landing(${MAX_LANDING})`, 'Lap Time(sec)', `Time Pts(${MAX_TIME})`, `Total(${MAX_TOTAL})`, 'Judge', 'Signed'];
-    const rows = ranked.map((s) => [s.rank, s.bib, s.name, s.country || '', s.affiliation || '', s.grade || '', s.gender || '', s.missionScore, s.landingScore, s.lapTime > 0 ? s.lapTime.toFixed(2) : 'DNF', s.timeScore, s.totalScore, s.judge || '', s.signature ? 'Y' : 'N']);
+    // 부문 순서대로, 부문 안에서는 순위대로 (시상용)
+    const header = ['Division', 'Division Rank', 'Bib', 'Name', 'Country', 'Affiliation', 'Grade', 'Gender', `Mission(${MAX_MISSION})`, `Landing(${MAX_LANDING})`, 'Lap Time(sec)', `Time Pts(${MAX_TIME})`, `Total(${MAX_TOTAL})`, 'Overall Rank', 'Judge', 'Signed'];
+    const overallRank = Object.fromEntries(overall.map((r) => [r.id, r.rank]));
+    const rows = Object.entries(byDivision).flatMap(([k, list]) => list.map((s) => [
+      divisionInfo(k).label, s.rank, s.bib, s.name, s.country || '', s.affiliation || '', s.grade || '', s.gender || '',
+      s.missionScore, s.landingScore, s.lapTime > 0 ? s.lapTime.toFixed(2) : 'DNF', s.timeScore, s.totalScore,
+      overallRank[s.id], s.judge || '', s.signature ? 'Y' : 'N',
+    ]));
     const csv = '﻿' + [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
@@ -1056,7 +1113,7 @@ function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore,
     notify(res.ok ? '전체 기록을 삭제했습니다.' : failMessage(res.reason), res.ok ? 'success' : 'error');
   };
 
-  const top3 = ranked.slice(0, 3);
+  const top3 = tab === 'all' ? [] : ranked.slice(0, 3);
 
   return (
     <div>
@@ -1079,13 +1136,13 @@ function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore,
           <h2 className="text-3xl font-black text-slate-900 flex items-center gap-3">
             <Trophy className="text-amber-500" size={32} /> Live Leaderboard
           </h2>
-          <p className="text-slate-600 font-medium mt-1">실시간 순위 · 총 {ranked.length}명 · 만점 {MAX_TOTAL}점</p>
+          <p className="text-slate-600 font-medium mt-1">실시간 순위 · 총 {overall.length}명 · 만점 {MAX_TOTAL}점 · 부문별 시상</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button onClick={downloadCSV} disabled={!ranked.length} className="h-12 px-5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold flex items-center gap-2">
+          <button onClick={downloadCSV} disabled={!overall.length} className="h-12 px-5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold flex items-center gap-2">
             <Download size={18} /> CSV 저장
           </button>
-          <button onClick={handleClear} disabled={!ranked.length} className="h-12 px-5 rounded-xl bg-white border-2 border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-40 font-bold flex items-center gap-2">
+          <button onClick={handleClear} disabled={!overall.length} className="h-12 px-5 rounded-xl bg-white border-2 border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-40 font-bold flex items-center gap-2">
             <Trash2 size={18} /> 전체 삭제
           </button>
         </div>
@@ -1099,6 +1156,55 @@ function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore,
         clearRoster={clearRoster}
         notify={notify}
       />
+
+      {/* 부문 탭 */}
+      <div className="mb-5 flex flex-wrap gap-2" role="tablist" aria-label="부문">
+        {[['all', '전체', overall.length], ...Object.entries(byDivision).map(([k, rows]) => [k, divisionInfo(k).label, rows.length])].map(([k, label, n]) => (
+          <button
+            key={k}
+            role="tab"
+            aria-selected={tab === k}
+            onClick={() => setTab(k)}
+            className={`h-12 px-5 rounded-xl border-2 font-black text-lg flex items-center gap-2 transition ${
+              tab === k ? 'bg-slate-900 border-slate-900 text-white' : 'bg-white border-slate-300 text-slate-800 hover:border-slate-500'
+            }`}
+          >
+            {label}
+            <span className={`text-sm font-bold tabular-nums ${tab === k ? 'text-slate-300' : 'text-slate-500'}`}>{n}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* 전체 탭: 부문별 1~3위 요약 */}
+      {tab === 'all' && overall.length > 0 && (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 mb-6">
+          {Object.entries(byDivision).map(([k, rows]) => (
+            <button
+              key={k}
+              onClick={() => setTab(k)}
+              className="text-left bg-white border border-slate-200 rounded-2xl shadow-sm p-4 hover:border-slate-400"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <DivisionBadge division={k} size="lg" />
+                <span className="text-sm font-bold text-slate-500">{rows.length}명</span>
+              </div>
+              {rows.length === 0 ? (
+                <p className="text-sm font-semibold text-slate-400 py-2">아직 기록 없음</p>
+              ) : (
+                <ol className="space-y-1">
+                  {rows.slice(0, 3).map((r) => (
+                    <li key={r.id} className="flex items-center gap-2">
+                      <span className="w-6 text-center">{['🥇', '🥈', '🥉'][r.rank - 1] || r.rank}</span>
+                      <span className="flex-1 min-w-0 font-bold text-slate-900 truncate">{r.name}</span>
+                      <span className="font-black tabular-nums text-slate-900">{r.totalScore}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Podium */}
       {top3.length > 0 && (
@@ -1124,7 +1230,7 @@ function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore,
           <table className="w-full text-left min-w-[900px]">
             <thead className="bg-slate-100 text-slate-700 text-sm font-black">
               <tr>
-                <th className="py-3 px-4">Rank</th>
+                <th className="py-3 px-4">{tab === 'all' ? '부문 순위' : 'Rank'}</th>
                 <th className="py-3 px-4">Bib</th>
                 <th className="py-3 px-4">Name</th>
                 <th className="py-3 px-4 text-center">Mission <span className="font-semibold text-slate-500">/{MAX_MISSION}</span></th>
@@ -1145,8 +1251,13 @@ function Dashboard({ scores, roster = [], claims = {}, updateScore, deleteScore,
                 </tr>
               ) : (
                 filtered.map((row) => (
-                  <tr key={row.id} className={`border-t border-slate-200 ${rowTint(row.rank)}`}>
-                    <td className="py-3 px-4"><RankBadge rank={row.rank} /></td>
+                  <tr key={row.id} className={`border-t border-slate-200 ${rowTint(tab === 'all' ? 0 : row.rank)}`}>
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-2">
+                        <RankBadge rank={tab === 'all' ? divRank[row.id] : row.rank} />
+                        {tab === 'all' && <DivisionBadge division={row.division} />}
+                      </div>
+                    </td>
                     <td className="py-3 px-4 font-black text-slate-800 text-lg tabular-nums">{row.bib}</td>
                     <td className="py-3 px-4">
                       <div className="font-bold text-slate-900 text-lg">{row.name}</div>

@@ -40,7 +40,7 @@ const withTimeout = (promise) =>
 const str = (v) => String(v ?? '').trim();
 
 /** 참가자 부가 정보 (명단에서 가져와 기록에 함께 저장) */
-export const PROFILE_FIELDS = ['country', 'affiliation', 'grade', 'gender'];
+export const PROFILE_FIELDS = ['division', 'country', 'affiliation', 'grade', 'gender'];
 
 // 저장할 필드만 골라냄 (id·계산값이 섞여 들어가지 않도록)
 const pickFields = (r) => ({

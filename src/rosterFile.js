@@ -1,3 +1,5 @@
+import { matchDivision } from './divisions';
+
 // =============================================================================
 //  참가자 명단 엑셀(.xlsx / .xls / .csv) 읽기 · 빈 양식 만들기
 //  - 첫 줄(제목 줄)의 이름으로 칸을 찾습니다. 순서는 자유, 한글·영어 모두 인식.
@@ -8,6 +10,7 @@
 const HEADER_ALIASES = {
   order: ['순서', '순번', '출전순서', 'no', 'order', 'seq'],
   bib: ['참가번호', '배번', '배번호', '번호', '선수번호', 'bib', 'bibno', 'number', 'id'],
+  division: ['부문', '구분', '카테고리', '리그', '학교급', 'division', 'category', 'league'],
   name: ['이름', '성명', '선수명', '참가자', '참가자명', '팀명', 'name', 'participant', 'player'],
   country: ['국가', '나라', '국적', 'country', 'nation', 'nationality'],
   affiliation: ['소속', '학교', '기관', '소속기관', '팀', 'affiliation', 'school', 'team', 'organization', 'org'],
@@ -21,7 +24,7 @@ const ALIAS_LOOKUP = Object.fromEntries(
   Object.entries(HEADER_ALIASES).flatMap(([key, names]) => names.map((n) => [norm(n), key]))
 );
 
-export const TEMPLATE_HEADERS = ['순서', '참가번호', '이름', '국가', '소속', '학년', '성별', '조'];
+export const TEMPLATE_HEADERS = ['순서', '참가번호', '이름', '부문', '국가', '소속', '학년', '성별', '조'];
 
 /**
  * 파일을 읽어 { entries, warnings, columns } 를 돌려줍니다.
@@ -63,6 +66,12 @@ export async function parseRosterFile(file) {
       group: get('group'),
     };
     if (!e.bib && !e.name) return; // 빈 줄
+    // 부문: '부문' 칸 → 없거나 못 알아보면 '학년' 칸(초6·중2·고1·대3)에서 판단
+    const divText = get('division');
+    e.division = matchDivision(divText) || matchDivision(e.grade);
+    if (!e.division) {
+      warnings.push(`${headerIdx + i + 2}번째 줄 (${e.name || e.bib}): 부문을 알 수 없습니다${divText ? ` ('${divText}')` : ''}. 심판 화면에서 부문을 골라야 합니다.`);
+    }
     if (!e.name) warnings.push(`${headerIdx + i + 2}번째 줄: 이름이 비어 있습니다.`);
     if (!e.bib) warnings.push(`${headerIdx + i + 2}번째 줄: 참가번호가 비어 있습니다.`);
     entries.push(e);
@@ -90,12 +99,13 @@ export async function downloadRosterTemplate(filename = 'Drone_Chase_명단양�
   const XLSX = await import('xlsx');
   const data = [
     TEMPLATE_HEADERS,
-    [1, '101', '(예시) 홍길동', 'Korea', 'OO초등학교', '6', '남', 'A'],
-    [2, '102', '(예시) Bat-Erdene', 'Mongolia', 'MNUE Lab School', '5', 'M', 'A'],
-    [3, '103', '(예시) Nguyen An', 'Vietnam', 'Hanoi STEAM Club', '6', 'F', 'B'],
+    [1, '101', '(예시) 홍길동', '초등부', 'Korea', 'OO초등학교', '6', '남', 'A'],
+    [2, '102', '(예시) 김하늘', '중등부', 'Korea', '광신중학교', '중2', '여', 'A'],
+    [3, '103', '(예시) Bat-Erdene', '고등부', 'Mongolia', 'MNUE Lab School', '고1', 'M', 'B'],
+    [4, '104', '(예시) Nguyen An', '일반부', 'Vietnam', 'Hanoi University', '대3', 'F', 'B'],
   ];
   const ws = XLSX.utils.aoa_to_sheet(data);
-  ws['!cols'] = [{ wch: 6 }, { wch: 10 }, { wch: 22 }, { wch: 12 }, { wch: 22 }, { wch: 6 }, { wch: 6 }, { wch: 6 }];
+  ws['!cols'] = [{ wch: 6 }, { wch: 10 }, { wch: 22 }, { wch: 8 }, { wch: 12 }, { wch: 22 }, { wch: 6 }, { wch: 6 }, { wch: 6 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '명단');
   XLSX.writeFile(wb, filename);

@@ -20,6 +20,15 @@ export const HQ_PASSWORD = 'admin2026';
 // ※ IDRCC 채점 앱이 쓰는 'scores', 'signatures' 와 같은 이름은 쓰지 마세요.
 export const DB_PATH = 'drone_chase_2026';
 
+// 시상 부문 — HQ 순위가 부문별로 따로 매겨집니다.
+//  label: 화면 표시 이름 / aliases: 엑셀 '부문' 칸에 적을 수 있는 말 (학년 칸의 '초6', '중2', '고1', '대3' 도 자동 인식)
+export const DIVISIONS = [
+  { key: 'elementary', label: '초등부', en: 'Elementary', aliases: ['초', '초등', '초등학교', '초등학생', '초등부', 'elementary', 'elem', 'primary'] },
+  { key: 'middle', label: '중등부', en: 'Middle School', aliases: ['중', '중등', '중학교', '중학생', '중등부', 'middle', 'middleschool', 'junior'] },
+  { key: 'high', label: '고등부', en: 'High School', aliases: ['고', '고등', '고등학교', '고등학생', '고등부', 'high', 'highschool', 'senior'] },
+  { key: 'general', label: '일반부', en: 'General', aliases: ['일반', '일반부', '대', '대학', '대학생', '대학교', '성인', 'general', 'university', 'college', 'adult', 'open'] },
+];
+
 // CSV 저장 파일명
 export const CSV_FILENAME = 'Drone_Chase_2026_Results.csv';
 

@@ -5,6 +5,14 @@ import {
 } from 'lucide-react';
 import { CLAIM_TTL_MS, failMessage } from './useScores';
 import { parseRosterFile, downloadRosterTemplate } from './rosterFile';
+import { divisionInfo } from './divisions';
+
+/** 부문 배지 (초등부·중등부·고등부·일반부) */
+export function DivisionBadge({ division, size = 'sm' }) {
+  const d = divisionInfo(division);
+  const sz = size === 'lg' ? 'text-sm px-2.5 py-1' : 'text-xs px-2 py-0.5';
+  return <span className={`inline-block shrink-0 rounded-md border font-black whitespace-nowrap ${sz} ${d.color}`}>{d.label}</span>;
+}
 
 // =============================================================================
 //  참가자 명단 — 심판용 선택 패널(RosterPicker) / HQ용 명단 관리(RosterManager)
@@ -121,8 +129,11 @@ export function RosterPicker({
             <UserCheck size={28} className="text-blue-600 shrink-0" />
             <div className="min-w-0 flex-1">
               <div className="text-xs font-black text-blue-700">채점 중인 참가자 · 순서 {selected.order}</div>
-              <div className="text-2xl font-black text-slate-900 truncate">
-                <span className="tabular-nums">#{selected.bib}</span> {selected.name}
+              <div className="flex items-center gap-2 min-w-0">
+                <DivisionBadge division={selected.division} size="lg" />
+                <span className="text-2xl font-black text-slate-900 truncate">
+                  <span className="tabular-nums">#{selected.bib}</span> {selected.name}
+                </span>
               </div>
               {profileLine(selected) && <div className="text-sm font-semibold text-slate-600">{profileLine(selected)}</div>}
             </div>
@@ -138,8 +149,11 @@ export function RosterPicker({
           <div className="flex flex-wrap items-center gap-4">
             <div className="min-w-0 flex-1">
               <div className="text-xs font-black text-slate-600">다음 순서 · {next.order}번째{next.group ? ` · ${next.group}조` : ''}</div>
-              <div className="text-3xl font-black text-slate-900 truncate">
-                <span className="tabular-nums text-blue-700">#{next.bib}</span> {next.name}
+              <div className="flex items-center gap-2 min-w-0">
+                <DivisionBadge division={next.division} size="lg" />
+                <span className="text-3xl font-black text-slate-900 truncate">
+                  <span className="tabular-nums text-blue-700">#{next.bib}</span> {next.name}
+                </span>
               </div>
               {profileLine(next) && <div className="text-base font-semibold text-slate-600">{profileLine(next)}</div>}
             </div>
@@ -196,7 +210,7 @@ export function RosterPicker({
                       <span className="w-8 text-sm font-bold text-slate-500 tabular-nums">{r.order}</span>
                       <span className="w-16 font-black text-slate-900 tabular-nums">#{r.bib}</span>
                       <span className="flex-1 min-w-0">
-                        <span className="block font-bold text-slate-900 truncate">{r.name}</span>
+                        <span className="flex items-center gap-1.5 min-w-0"><DivisionBadge division={r.division} /><span className="font-bold text-slate-900 truncate">{r.name}</span></span>
                         {profileLine(r) && <span className="block text-xs font-semibold text-slate-500 truncate">{profileLine(r)}</span>}
                       </span>
                       <StatusChip status={st} claim={claims[r.id]} />
@@ -209,6 +223,20 @@ export function RosterPicker({
         )}
       </div>
     </section>
+  );
+}
+
+function DivisionSummary({ entries }) {
+  const counts = {};
+  entries.forEach((e) => { counts[e.division || '_none'] = (counts[e.division || '_none'] || 0) + 1; });
+  return (
+    <div className="mb-4 flex flex-wrap gap-2">
+      {Object.entries(counts).map(([k, n]) => (
+        <span key={k} className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-700">
+          <DivisionBadge division={k} size="lg" /> {n}명
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -299,7 +327,7 @@ export function RosterManager({ roster, claims, scores, saveRoster, clearRoster,
           <table className="w-full text-left text-sm min-w-[640px]">
             <thead className="bg-slate-100 text-slate-700 font-black sticky top-0">
               <tr>
-                <th className="py-2 px-3">순서</th><th className="py-2 px-3">번호</th><th className="py-2 px-3">이름</th>
+                <th className="py-2 px-3">순서</th><th className="py-2 px-3">번호</th><th className="py-2 px-3">이름</th><th className="py-2 px-3">부문</th>
                 <th className="py-2 px-3">국가 · 소속 · 학년 · 성별</th><th className="py-2 px-3">조</th><th className="py-2 px-3">상태</th>
               </tr>
             </thead>
@@ -309,6 +337,7 @@ export function RosterManager({ roster, claims, scores, saveRoster, clearRoster,
                   <td className="py-2 px-3 tabular-nums text-slate-600">{r.order}</td>
                   <td className="py-2 px-3 font-black tabular-nums">{r.bib}</td>
                   <td className="py-2 px-3 font-bold">{r.name}</td>
+                  <td className="py-2 px-3"><DivisionBadge division={r.division} /></td>
                   <td className="py-2 px-3 text-slate-600">{profileLine(r)}</td>
                   <td className="py-2 px-3">{r.group}</td>
                   <td className="py-2 px-3"><StatusChip status={statusOf(r, ctx)} claim={claims[r.id]} /></td>
@@ -330,6 +359,7 @@ export function RosterManager({ roster, claims, scores, saveRoster, clearRoster,
               <button onClick={() => setPreview(null)} className="w-10 h-10 grid place-items-center rounded-full hover:bg-slate-100" aria-label="Close"><X size={22} /></button>
             </div>
             <div className="p-6 overflow-y-auto">
+              <DivisionSummary entries={preview.entries} />
               {preview.warnings.length > 0 && (
                 <div className="mb-4 rounded-xl bg-amber-50 border border-amber-300 p-3 text-sm text-amber-900 font-semibold">
                   <p className="flex items-center gap-2 font-black"><AlertTriangle size={16} /> 확인이 필요한 줄 {preview.warnings.length}건</p>
@@ -339,7 +369,7 @@ export function RosterManager({ roster, claims, scores, saveRoster, clearRoster,
               <div className="overflow-x-auto border border-slate-200 rounded-xl">
                 <table className="w-full text-left text-sm min-w-[600px]">
                   <thead className="bg-slate-100 font-black text-slate-700">
-                    <tr><th className="py-2 px-3">순서</th><th className="py-2 px-3">번호</th><th className="py-2 px-3">이름</th><th className="py-2 px-3">국가 · 소속 · 학년 · 성별</th><th className="py-2 px-3">조</th></tr>
+                    <tr><th className="py-2 px-3">순서</th><th className="py-2 px-3">번호</th><th className="py-2 px-3">이름</th><th className="py-2 px-3">부문</th><th className="py-2 px-3">국가 · 소속 · 학년 · 성별</th><th className="py-2 px-3">조</th></tr>
                   </thead>
                   <tbody>
                     {preview.entries.slice(0, 50).map((r, i) => (
@@ -347,6 +377,7 @@ export function RosterManager({ roster, claims, scores, saveRoster, clearRoster,
                         <td className="py-2 px-3 tabular-nums">{r.order}</td>
                         <td className="py-2 px-3 font-black tabular-nums">{r.bib}</td>
                         <td className="py-2 px-3 font-bold">{r.name}</td>
+                        <td className="py-2 px-3"><DivisionBadge division={r.division} /></td>
                         <td className="py-2 px-3 text-slate-600">{profileLine(r)}</td>
                         <td className="py-2 px-3">{r.group}</td>
                       </tr>
