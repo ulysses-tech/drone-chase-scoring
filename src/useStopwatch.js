@@ -41,10 +41,10 @@ function buzz(pattern) {
 /**
  * @param {(ms:number) => void} onStop 정지 시 호출 (랩타임 칸 자동 입력용)
  */
-export function useStopwatch(onStop) {
+export function useStopwatch(onStop, storageKey = SW_KEY) {
   const [sw, setSw] = useState(() => {
     try {
-      const s = JSON.parse(storage.get(SW_KEY) || 'null');
+      const s = JSON.parse(storage.get(storageKey) || 'null');
       if (s && (s.status === 'running' || s.status === 'stopped') && Number(s.startAt) > 0) return s;
     } catch { /* corrupt state */ }
     return { status: 'idle', startAt: 0, elapsed: 0 };
@@ -55,8 +55,8 @@ export function useStopwatch(onStop) {
 
   // 상태 저장
   useEffect(() => {
-    if (sw.status === 'idle') storage.remove(SW_KEY);
-    else storage.set(SW_KEY, JSON.stringify(sw));
+    if (sw.status === 'idle') storage.remove(storageKey);
+    else storage.set(storageKey, JSON.stringify(sw));
   }, [sw]);
 
   // 새로고침 직후 '정지' 상태였다면 기록을 폼에 다시 채움
@@ -94,8 +94,9 @@ export function useStopwatch(onStop) {
 
   const elapsed = sw.status === 'running' ? Math.max(0, now - sw.startAt) : sw.elapsed;
 
-  const start = () => {
-    const t = Date.now();
+  /** at: 시작 시각(ms). '동시 START' 때 두 레인이 같은 시각으로 시작하도록 */
+  const start = (at) => {
+    const t = typeof at === 'number' ? at : Date.now();
     setNow(t);
     setSw({ status: 'running', startAt: t, elapsed: 0 });
     buzz(40);

@@ -40,8 +40,8 @@ export const DEVICE_ID = (() => {
 
 
 /** 다른 기기의 유효한 '채점 중' 표시인지 */
-export const claimedByOther = (claim) =>
-  Boolean(claim && claim.device !== DEVICE_ID && Date.now() - (Number(claim.at) || 0) < CLAIM_TTL_MS);
+export const claimedByOther = (claim, device = DEVICE_ID) =>
+  Boolean(claim && claim.device !== device && Date.now() - (Number(claim.at) || 0) < CLAIM_TTL_MS);
 
 /** 국가 · 소속 · 학년 · 성별 한 줄 */
 export const profileLine = (p) =>
@@ -50,10 +50,10 @@ export const profileLine = (p) =>
     .join(' · ');
 
 /** 명단 항목의 상태: done | busy | mine | wait */
-const statusOf = (entry, { scoredKeys, claims, selectedId }) => {
+const statusOf = (entry, { scoredKeys, claims, selectedId, device }) => {
   if (entry.id === selectedId) return 'mine';
   if (scoredKeys.has(personKey(entry))) return 'done';
-  if (claimedByOther(claims[entry.id])) return 'busy';
+  if (claimedByOther(claims[entry.id], device)) return 'busy';
   return 'wait';
 };
 
@@ -72,7 +72,7 @@ function StatusChip({ status, claim }) {
 //  심판용: 다음 순서 / 명단에서 선택
 // -----------------------------------------------------------------------------
 export function RosterPicker({
-  roster, claims, scores, selectedId, judgeName, setJudgeName, group, setGroup, onSelect, busy, round,
+  roster, claims, scores, selectedId, judgeName, setJudgeName, group, setGroup, onSelect, busy, round, device = DEVICE_ID,
 }) {
   const [showList, setShowList] = useState(false);
   const [query, setQuery] = useState('');
@@ -84,7 +84,7 @@ export function RosterPicker({
   );
   const groups = useMemo(() => [...new Set(roster.map((r) => r.group).filter(Boolean))].sort(), [roster]);
   const inGroup = group && groups.includes(group) ? roster.filter((r) => r.group === group) : roster;
-  const ctx = { scoredKeys, claims, selectedId };
+  const ctx = { scoredKeys, claims, selectedId, device };
 
   const doneCount = inGroup.filter((r) => scoredKeys.has(personKey(r))).length;
   const next = inGroup.find((r) => statusOf(r, ctx) === 'wait');

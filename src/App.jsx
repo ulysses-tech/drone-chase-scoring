@@ -36,6 +36,14 @@ const session = {
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => session.get(AUTH_KEY) === 'true');
   const [view, setView] = useState('landing');
+  // 심판 화면: dual = 2인 동시(레인 A·B) / single = 1인
+  const [judgeMode, setJudgeModeState] = useState(() => {
+    try { return localStorage.getItem('drone_chase_judge_mode') || 'dual'; } catch { return 'dual'; }
+  });
+  const setJudgeMode = (m) => {
+    setJudgeModeState(m);
+    try { localStorage.setItem('drone_chase_judge_mode', m); } catch { /* ignore */ }
+  };
   const [hqAuth, setHqAuth] = useState(() => session.get(HQ_KEY) === 'true');
   const [toast, setToast] = useState(null);
   const store = useScores();
@@ -81,18 +89,10 @@ export default function App() {
         </div>
       )}
 
-      <main className="max-w-6xl mx-auto px-4 py-6 sm:px-6 sm:py-10 animate-fade-in" key={view}>
+      <main className={`${view === 'judge' && judgeMode === 'dual' ? 'max-w-[1500px]' : 'max-w-6xl'} mx-auto px-4 py-6 sm:px-6 sm:py-10 animate-fade-in`} key={view}>
         {view === 'landing' && <LandingView setView={setView} count={store.scores.length} />}
         {view === 'judge' && (
-          <JudgePanel
-            addScore={store.addScore}
-            notify={notify}
-            roster={store.roster}
-            claims={store.claims}
-            scores={store.scores}
-            claimParticipant={store.claimParticipant}
-            releaseParticipant={store.releaseParticipant}
-          />
+          <JudgeView store={store} notify={notify} mode={judgeMode} setMode={setJudgeMode} />
         )}
         {view === 'dashboard' && (hqAuth ? (
           <Dashboard {...store} notify={notify} />
@@ -658,6 +658,107 @@ function NoTimerDialog({ lapTime, onBack, onSubmitAnyway }) {
   );
 }
 
+// =============================================================================
+//  심판 화면 묶음: 1인 / 2인 동시(레인 A·B)
+// =============================================================================
+function JudgeView({ store, notify, mode, setMode }) {
+  const [round, setRoundState] = useState(() => {
+    const v = localPref.get('drone_chase_round');
+    return ROUNDS.some((r) => r.key === v) ? v : ROUNDS[0].key;
+  });
+  const setRound = (v) => { setRoundState(v); localPref.set('drone_chase_round', v); };
+  const [judgeName, setJudgeNameState] = useState(() => localPref.get('drone_chase_judge_name'));
+  const setJudgeName = (v) => { setJudgeNameState(v); localPref.set('drone_chase_judge_name', v); };
+  const [group, setGroupState] = useState(() => localPref.get('drone_chase_group'));
+  const setGroup = (v) => { setGroupState(v); localPref.set('drone_chase_group', v); };
+  const shared = { round, setRound, judgeName, setJudgeName, group, setGroup };
+
+  const common = {
+    addScore: store.addScore,
+    notify,
+    roster: store.roster,
+    claims: store.claims,
+    scores: store.scores,
+    claimParticipant: store.claimParticipant,
+    releaseParticipant: store.releaseParticipant,
+  };
+
+  const startAll = () => {
+    const detail = { at: Date.now(), started: [] };
+    window.dispatchEvent(new CustomEvent('dc-start-all', { detail }));
+    if (!detail.started.length) notify('시작할 레인이 없습니다. 두 레인에 참가자를 먼저 입력하세요 (이미 측정 중이거나 끝난 레인은 제외).');
+    else if (detail.started.length === 1) notify(`레인 ${detail.started[0]} 만 시작했습니다. (다른 레인은 참가자가 없거나 이미 측정됨)`, 'success');
+    else notify('레인 A · B 초시계를 동시에 시작했습니다.', 'success');
+  };
+
+  const modeToggle = (
+    <div className="inline-flex p-1 rounded-xl bg-slate-200/80" role="radiogroup" aria-label="심판 화면">
+      {[['dual', '2인 동시', 'Lane A · B'], ['single', '1인', 'Single']].map(([k, label, en]) => (
+        <button
+          key={k}
+          type="button"
+          role="radio"
+          aria-checked={mode === k}
+          onClick={() => setMode(k)}
+          className={`h-12 px-4 rounded-lg font-black leading-tight ${mode === k ? 'bg-white text-slate-900 shadow' : 'text-slate-600'}`}
+        >
+          {label}
+          <span className="block text-[10px] font-bold text-slate-500">{en}</span>
+        </button>
+      ))}
+    </div>
+  );
+
+  if (mode !== 'dual') {
+    return (
+      <div>
+        <div className="max-w-3xl mx-auto mb-4 flex justify-end">{modeToggle}</div>
+        <JudgePanel key="single" {...common} />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* 공통 막대: 화면 모드 · 차수 · 동시 START */}
+      <div className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border-2 border-slate-900 bg-white px-4 py-3">
+        {modeToggle}
+        <div className="flex items-center gap-2">
+          <span className="font-black text-slate-900">차수</span>
+          {ROUNDS.map((r) => (
+            <button
+              key={r.key}
+              type="button"
+              aria-pressed={round === r.key}
+              onClick={() => setRound(r.key)}
+              className={`h-12 min-w-[4.5rem] px-4 rounded-xl border-2 font-black text-lg ${
+                round === r.key ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-700'
+              }`}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={startAll}
+          className="ml-auto h-14 px-6 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xl font-black flex items-center gap-2 shadow-md active:scale-[0.98]"
+        >
+          <Play size={22} fill="currentColor" /> A · B 동시 START
+        </button>
+      </div>
+      <p className="-mt-3 mb-5 text-sm font-semibold text-slate-600">
+        동시 START로 두 초시계가 같은 시각에 시작합니다. 도착하는 대로 각 레인의 <b>STOP</b>을 따로 누르세요. 따로 출발할 때는 각 레인의 START를 쓰면 됩니다.
+      </p>
+
+      <div className="grid gap-6 xl:grid-cols-2 items-start">
+        <JudgePanel key="lane-A" {...common} lane="A" shared={shared} />
+        <JudgePanel key="lane-B" {...common} lane="B" shared={shared} />
+      </div>
+    </div>
+  );
+}
+
 function TimerStatusChip({ status }) {
   const map = {
     idle: ['bg-slate-100 text-slate-700 border-slate-300', 'Ready'],
@@ -764,22 +865,33 @@ const validate = (form) => {
 // =============================================================================
 //  Judge Panel
 // =============================================================================
-function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], claimParticipant, releaseParticipant }) {
+function JudgePanel({
+  addScore, notify, roster = [], claims = {}, scores = [], claimParticipant, releaseParticipant,
+  lane = null, shared = null, // 2인 모드: lane = 'A' | 'B', shared = { round, setRound, judgeName, setJudgeName, group, setGroup }
+}) {
   const [form, setForm] = useState(blankForm);
   const [saving, setSaving] = useState(false);
   const [submitted, setSubmitted] = useState(null);
 
   // ── 참가자 명단 연동 ──────────────────────────────────────────────
-  const [judgeName, setJudgeNameState] = useState(() => localPref.get('drone_chase_judge_name'));
-  const setJudgeName = (v) => { setJudgeNameState(v); localPref.set('drone_chase_judge_name', v); };
-  const [group, setGroupState] = useState(() => localPref.get('drone_chase_group'));
+  const [judgeNameLocal, setJudgeNameState] = useState(() => localPref.get('drone_chase_judge_name'));
+  const setJudgeNameLocal = (v) => { setJudgeNameState(v); localPref.set('drone_chase_judge_name', v); };
+  const [groupLocal, setGroupState] = useState(() => localPref.get('drone_chase_group'));
   // 차수(1차·2차): 기기에 기억 — 보통 1차를 모두 마친 뒤 2차로 바꿈
-  const [round, setRoundState] = useState(() => {
+  const [roundLocal, setRoundState] = useState(() => {
     const v = localPref.get('drone_chase_round');
     return ROUNDS.some((r) => r.key === v) ? v : ROUNDS[0].key;
   });
-  const setRound = (v) => { setRoundState(v); localPref.set('drone_chase_round', v); };
-  const setGroup = (v) => { setGroupState(v); localPref.set('drone_chase_group', v); };
+  const setRoundLocal = (v) => { setRoundState(v); localPref.set('drone_chase_round', v); };
+  const setGroupLocal = (v) => { setGroupState(v); localPref.set('drone_chase_group', v); };
+  // 2인 모드에서는 차수·심판 이름·조를 두 레인이 함께 씀
+  const round = shared ? shared.round : roundLocal;
+  const setRound = shared ? shared.setRound : setRoundLocal;
+  const judgeName = shared ? shared.judgeName : judgeNameLocal;
+  const setJudgeName = shared ? shared.setJudgeName : setJudgeNameLocal;
+  const group = shared ? shared.group : groupLocal;
+  const setGroup = shared ? shared.setGroup : setGroupLocal;
+  const myDevice = lane ? `${DEVICE_ID}-${lane}` : DEVICE_ID; // 레인마다 따로 '채점 중' 표시
   const [selectedId, setSelectedId] = useState(null);
   const [selecting, setSelecting] = useState(false);
   const selectedEntry = roster.find((r) => r.id === selectedId) || null;
@@ -808,13 +920,33 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
   }, [hasName]);
 
   // 초시계: 정지하면 랩타임 칸에 자동 입력 (초 단위, 소수 둘째 자리)
-  const sw = useStopwatch((ms) => setForm((f) => ({ ...f, lapTime: msToSeconds(ms).toFixed(2) })));
+  const sw = useStopwatch(
+    (ms) => setForm((f) => ({ ...f, lapTime: msToSeconds(ms).toFixed(2) })),
+    lane ? `drone_chase_stopwatch_${lane}` : undefined
+  );
   const swRef = useRef(sw);
   swRef.current = sw;
   const timerRunning = sw.status === 'running';
 
+  // 2인 모드: '동시 START' 신호를 받으면 같은 시각으로 초시계 시작 (참가자가 입력된 레인만)
+  const formRef = useRef(form);
+  formRef.current = form;
+  useEffect(() => {
+    if (!lane) return undefined;
+    const onStartAll = (e) => {
+      const f = formRef.current;
+      if (swRef.current.status !== 'idle' || f.dq) return;
+      if (!String(f.name).trim() && !String(f.bib).trim()) return;
+      swRef.current.start(e.detail.at);
+      e.detail.started.push(lane);
+    };
+    window.addEventListener('dc-start-all', onStartAll);
+    return () => window.removeEventListener('dc-start-all', onStartAll);
+  }, [lane]);
+
   // PC: 스페이스바로 Start/Stop (입력 칸·버튼 사용 중에는 동작 안 함)
   useEffect(() => {
+    if (lane) return undefined; // 2인 모드에서는 스페이스바 사용 안 함 (두 레인이 함께 반응하는 것 방지)
     const onKey = (e) => {
       if (e.code !== 'Space' || e.repeat) return;
       const t = e.target;
@@ -825,7 +957,7 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [lane]);
 
   const mission = missionScoreOf(form.obstacles);
   const landing = Number(form.landingScore) || 0;
@@ -847,13 +979,13 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
     if (!String(judgeName).trim()) return notify('심판 이름을 먼저 입력하세요. (여러 심판이 같은 참가자를 고르지 않도록 표시됩니다)');
     if (timerRunning) return notify('초시계 측정 중에는 참가자를 바꿀 수 없습니다. STOP을 먼저 누르세요.');
     const claim = claims[entry.id];
-    if (claimedByOther(claim) && !window.confirm(`${claim.judge || '다른'} 심판이 이 참가자를 채점 중입니다.\n그래도 선택할까요?`)) return;
+    if (claimedByOther(claim, myDevice) && !window.confirm(`${claim.judge || '다른'} 심판이 이 참가자를 채점 중입니다.\n그래도 선택할까요?`)) return;
     if (scores.some((s) => personKey(s) === personKey(entry) && roundOf(s) === round) && !window.confirm(`#${entry.bib} ${entry.name} 은(는) 이미 ${roundInfo(round).label} 채점이 완료된 참가자입니다.\n다시 채점할까요?`)) return;
     const dirty = form.bib || form.name || form.lapTime || form.obstacles.some(Boolean) || sw.status !== 'idle' || hasSignature;
     if (dirty && !window.confirm('지금 입력 중인 내용(점수·초시계·서명)이 지워집니다. 참가자를 바꿀까요?')) return;
 
     setSelecting(true);
-    const res = await claimParticipant(entry.id, judgeName, DEVICE_ID);
+    const res = await claimParticipant(entry.id, lane ? `${judgeName} (${lane})` : judgeName, myDevice);
     setSelecting(false);
     if (!res.ok) return notify(failMessage(res.reason));
     if (selectedId && selectedId !== entry.id) releaseParticipant(selectedId);
@@ -946,14 +1078,21 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
   }
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-3xl mx-auto">
+    <form onSubmit={handleSubmit} className={lane ? 'min-w-0' : 'max-w-3xl mx-auto'}>
       <div className="mb-5 flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h2 className="text-3xl font-black text-slate-900">Official Score Sheet</h2>
-          <p className="text-slate-600 font-medium mt-1">
-            Total {MAX_TOTAL} = Mission {MAX_MISSION} + Landing {MAX_LANDING} + Time {MAX_TIME}
-          </p>
-        </div>
+        {lane ? (
+          <h2 className={`flex items-center gap-3 text-2xl font-black ${lane === 'A' ? 'text-blue-800' : 'text-orange-700'}`}>
+            <span className={`w-11 h-11 rounded-xl grid place-items-center text-white text-2xl ${lane === 'A' ? 'bg-blue-600' : 'bg-orange-500'}`}>{lane}</span>
+            레인 {lane} <span className="text-base font-bold text-slate-500">· Lane {lane}</span>
+          </h2>
+        ) : (
+          <div>
+            <h2 className="text-3xl font-black text-slate-900">Official Score Sheet</h2>
+            <p className="text-slate-600 font-medium mt-1">
+              Total {MAX_TOTAL} = Mission {MAX_MISSION} + Landing {MAX_LANDING} + Time {MAX_TIME}
+            </p>
+          </div>
+        )}
         <button
           type="button"
           onClick={() => {
@@ -971,8 +1110,8 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
         </button>
       </div>
 
-      {/* 차수 선택 (1차·2차) */}
-      <div className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border-2 border-slate-900 bg-white px-5 py-4">
+      {/* 차수 선택 (1차·2차) — 2인 모드에서는 위쪽 공통 막대에서 고름 */}
+      {!lane && <div className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border-2 border-slate-900 bg-white px-5 py-4">
         <span className="text-lg font-black text-slate-900 mr-auto">
           경기 차수 <span className="text-sm font-bold text-slate-500">· Round</span>
         </span>
@@ -1000,7 +1139,7 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
             );
           })}
         </div>
-      </div>
+      </div>}
 
       {form.dq && (
         <div role="alert" className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border-[3px] border-red-600 bg-red-50 px-5 py-4">
@@ -1030,6 +1169,7 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
           onSelect={selectParticipant}
           busy={selecting}
           round={round}
+          device={myDevice}
         />
       )}
 
@@ -1037,6 +1177,7 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
         form={form}
         setForm={setForm}
         stopwatch={sw}
+        compact={!!lane}
         afterParticipant={hasName && <ReadyAlert acknowledged={readyAck} onAcknowledge={() => setReadyAck(true)} />}
       />
 
@@ -1075,7 +1216,7 @@ function JudgePanel({ addScore, notify, roster = [], claims = {}, scores = [], c
 
       {/* 하단 고정: 초시계 + 실시간 합계 + 제출 */}
       <div className="sticky bottom-3 mt-6 z-40" style={{ marginBottom: 'env(safe-area-inset-bottom)' }}>
-        <div className="bg-white border-2 border-slate-300 rounded-2xl shadow-xl p-3 flex flex-col lg:flex-row lg:items-center gap-3">
+        <div className={`bg-white border-2 rounded-2xl shadow-xl p-3 flex flex-col gap-3 ${lane ? (lane === 'A' ? 'border-blue-400' : 'border-orange-400') : 'border-slate-300 lg:flex-row lg:items-center'}`}>
           <StopwatchControl sw={sw} lapTime={form.lapTime} highlightStart={readyAck && sw.status === 'idle'} />
           <div className="flex items-center gap-3 flex-1 min-w-0">
           <div className="flex-1 grid grid-cols-4 text-center">
